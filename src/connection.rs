@@ -87,7 +87,7 @@ impl GameConnection {
         let mut packet = BitStream::new();
         self.dnet.build_send_packet_header(&mut packet, NetPacketType::DataPacket);
 
-        for i in 0..(rand::random::<u16>() % 500) {
+        for i in 0..(rand::random::<u16>() % 2000) {
             packet.write_flag(rand::random());
         }
 
