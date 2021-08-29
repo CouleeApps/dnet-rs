@@ -9,6 +9,7 @@ pub mod bitstream;
 pub mod connection;
 pub mod dnet;
 pub mod packet;
+mod huffman;
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -1,4 +1,7 @@
 
+use crate::huffman;
+use crate::huffman::HuffmanProcessor;
+
 #[derive(Debug)]
 pub struct BitStream {
     data: Vec<u8>,
@@ -11,7 +14,7 @@ impl BitStream {
         BitStream {
             data: buffer,
             position: 0,
-            shift: 0
+            shift: 0,
         }
     }
 
@@ -19,7 +22,7 @@ impl BitStream {
         BitStream {
             data: vec![0],
             position: 0,
-            shift: 0
+            shift: 0,
         }
     }
 
@@ -37,6 +40,19 @@ impl BitStream {
             self.data.pop();
         }
         self.data
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.data.as_slice()
+    }
+
+    pub fn get_bit_pos(&self) -> usize {
+        self.position * 8 + self.shift
+    }
+
+    pub fn set_bit_pos(&mut self, pos: usize) {
+        self.position = pos / 8;
+        self.shift = pos % 8;
     }
 
     fn read_bits(&mut self, bits: usize) -> u8 {
@@ -98,7 +114,7 @@ impl BitStream {
         // some extra fun math.
         if self.shift + bits >= 8 {
 
-            //How many bits over 32 are we going to need?
+            //How many bits over 8 are we going to need?
             let extra = (self.shift + bits) % 8;
             //How many bits do we have left before 8?
             let remain = bits - extra;
@@ -106,8 +122,13 @@ impl BitStream {
             //Get the part of the value that will be pushed onto the current top,
             // should be `remain` bits long.
             let first = value & (0xFF >> (8 - remain));
+            let lower = if self.shift == 0 {
+                0
+            } else {
+                self.data[self.position] & (0xFF >> (8 - self.shift))
+            };
             //Push it on and make sure we start at the next open bit
-            self.data[self.position] |= first << self.shift;
+            self.data[self.position] = lower | (first << self.shift);
 
             //Get the second part of the value that will become the next top, should
             // be `extra` bits long.
@@ -129,7 +150,12 @@ impl BitStream {
             //We don't have to create a new top, we can just slap this one on the
             // end of the original one. OR the bits on, make sure to push them over
             // so they line up, and cut off anything at the end
-            self.data[self.position] |= (value << self.shift) & (0xFF >> (8 - bits - self.shift));
+            let lower = if self.shift == 0 {
+                0
+            } else {
+                self.data[self.position] & (0xFF >> (8 - self.shift))
+            };
+            self.data[self.position] = lower | ((value << self.shift) & (0xFF >> (8 - bits - self.shift)));
 
             //Just add to the shift
             self.shift += bits;
@@ -181,17 +207,7 @@ impl BitStream {
     }
 
     pub fn read_string(&mut self) -> String {
-        if self.read_flag() {
-            // todo!("huffman strings");
-            "".into()
-        } else {
-            let len = self.read_int(8);
-            let mut chars = vec![];
-            for i in 0..len {
-                chars.push(self.read_u8());
-            }
-            String::from_utf8(chars).expect("String is valid utf8")
-        }
+        HuffmanProcessor::read_string(self)
     }
 
     pub fn write_flag(&mut self, value: bool) -> bool {
@@ -215,11 +231,7 @@ impl BitStream {
     }
 
     pub fn write_string(&mut self, value: String) -> String {
-        self.write_flag(false); // compressed
-        self.write_int(value.len() as u32, 8);
-        for ch in value.as_bytes() {
-            self.write_u8(*ch);
-        }
+        HuffmanProcessor::write_string(self, &value);
         return value;
     }
 }
