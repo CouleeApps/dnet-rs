@@ -6,4 +6,11 @@ This is a partial reimplementation of Torque3D's UDP network stack in Rust. Curr
 - Some non-raw packet types (more would be easy to add)
 - Huffman string compression with lots of danger
 
+Not done:
+- Unguaranteed / Guaranteed / Ordered messages
+- NetEvents
+- Ghosted objects
+- Remote commands
+- Master server, ping, etc misc non-raw packets
+
 Currently the only client application is a network fuzzer that sends 2000 random bits. The bugs are already just falling out, so I've held off on making anything more advanced yet.
