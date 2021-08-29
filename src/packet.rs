@@ -15,6 +15,7 @@ pub mod PacketTypes {
     pub const GameInfoRequest: u8 = 18;
     pub const GameInfoResponse: u8 = 20;
     pub const GameHeartbeat: u8 = 22;
+    pub const GGCPacket: u8 = 24;
     pub const ConnectChallengeRequest: u8 = 26;
     pub const ConnectChallengeReject: u8 = 28;
     pub const ConnectChallengeResponse: u8 = 30;
