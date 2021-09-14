@@ -1,6 +1,10 @@
 
 use crate::huffman;
 use crate::huffman::HuffmanProcessor;
+use std::cmp::max;
+use std::f32::consts::{PI, FRAC_1_SQRT_2, SQRT_2};
+
+const POINT_EPSILON: f32 = 0.0001f32;
 
 #[derive(Debug)]
 pub struct BitStream {
@@ -210,6 +214,111 @@ impl BitStream {
         HuffmanProcessor::read_string(self)
     }
 
+    pub fn read_float_zero_to_one(&mut self, bit_count: usize) -> f32 {
+        let max_int = (1u32 << bit_count) - 1;
+        let i = self.read_int(bit_count);
+        if i == 0 {
+            return 0f32;
+        }
+        if i == (max_int / 2) + 1 {
+            return 0.5f32;
+        }
+        if i == max_int {
+            return 1.0f32;
+        }
+        return (i as f32) / (max_int as f32);
+    }
+
+    pub fn read_signed_float_neg_one_to_one(&mut self, bit_count: usize) -> f32 {
+        return self.read_float(bit_count) * 2f32 - 1f32;
+    }
+
+    pub fn read_signed_int(&mut self, bit_count: usize) -> i32 {
+        // 1s complement because torque is torque
+        if self.read_flag() {
+            return -(self.read_int(bit_count - 1) as i32);
+        } else {
+            return self.read_int(bit_count - 1) as i32;
+        }
+    }
+
+    pub fn read_normal_vector(&mut self, bit_count: usize) -> (f32, f32, f32) {
+        let phi = self.read_signed_float(bit_count + 1) * PI;
+        let theta = self.read_signed_float(bit_count) * (PI / 2.0);
+
+        (
+            phi.sin() * theta.cos(),
+            phi.cos() * theta.cos(),
+            theta.sin()
+        )
+    }
+
+    pub fn read_vector(&mut self, max_magnitude: f32, magnitude_bits: usize, normal_bits: usize) -> (f32, f32, f32) {
+        if !self.read_flag() {
+            return (0.0, 0.0, 0.0);
+        }
+
+        let mut mag;
+        if self.read_flag() {
+            mag = self.read_float(magnitude_bits) * max_magnitude;
+        } else {
+            mag = f32::from_bits(self.read_int(32));
+        }
+
+        let normal = self.read_normal_vector(normal_bits);
+        (
+            normal.0 * mag,
+            normal.1 * mag,
+            normal.2 * mag
+        )
+    }
+
+    pub fn read_quat(&mut self, bit_count: usize) -> (f32, f32, f32, f32) {
+        let mut vals = [0f32; 4];
+        let mut sum = 0f32;
+
+        let idx_max = self.read_int(2);
+        for i in 0..4 {
+            if i == idx_max {
+                continue;
+            }
+            vals[i] = self.read_signed_float(bit_count) * FRAC_1_SQRT_2;
+            sum += vals[i] * vals[i];
+        }
+
+        if sum > 1.0 {
+            vals[idx_max] = 1.0;
+        } else {
+            vals[idx_max] = (1.0 - sum).sqrt();
+        }
+
+        return (vals[0], vals[1], vals[2], vals[3]);
+    }
+
+    pub fn read_ranged_u32(&mut self, range_start: u32, range_end: u32) -> u32 {
+        let range_size = range_end - range_start + 1;
+        let range_bits = range_size.next_power_of_two().trailing_zeros();
+
+        let val = self.read_int(range_bits as usize);
+        return val + range_start;
+    }
+
+    pub fn read_cussed_u32(&mut self) -> u32 {
+        if self.read_flag() {
+            return 0;
+        } else if self.read_flag() {
+            return self.read_ranged_u32(0, 0xF);
+        } else if self.read_flag() {
+            return self.read_ranged_u32(0, 0xFF);
+        } else if self.read_flag() {
+            return self.read_ranged_u32(0, 0xFFFF);
+        } else if self.read_flag() {
+            return self.read_ranged_u32(0, 0xFFFFFF);
+        } else {
+            return self.read_ranged_u32(0, 0xFFFFFFFF);
+        }
+    }
+
     pub fn write_flag(&mut self, value: bool) -> bool {
         self.write_int(value as u32, 1);
         return value;
@@ -233,5 +342,142 @@ impl BitStream {
     pub fn write_string(&mut self, value: String) -> String {
         HuffmanProcessor::write_string(self, &value);
         return value;
+    }
+
+    pub fn write_float_zero_to_one(&mut self, mut value: f32, bit_count: usize) -> f32 {
+        let max_int = (1u32 << bit_count) - 1;
+        let mut i;
+        if value < POINT_EPSILON {
+            i = 0;
+            value = 0.0;
+        } else if (value - 0.5).abs() < POINT_EPSILON {
+            i = (max_int / 2) + 1;
+            value = 0.5;
+        } else if value > (1.0f32 - POINT_EPSILON) {
+            i = max_int;
+            value = 1.0;
+        } else {
+            i = (f * (max_int as f32)).round();
+            value = (i as f32) / (max_int as f32);
+        }
+
+        self.write_int(i, bit_count);
+
+        return value;
+    }
+
+    pub fn write_signed_float_neg_one_to_one(&mut self, value: f32, bit_count: usize) -> f32 {
+        return self.write_float((value + 1) / 2, bit_count) * 2f32 - 1f32;
+    }
+
+    pub fn write_signed_int(&mut self, value: i32, bit_count: usize) -> i32 {
+        // I will become back my money
+        if value < 0 {
+            self.write_flag(true);
+            self.write_int((-value) as u32, bit_count);
+        } else {
+            self.write_flag(false);
+            self.write_int(value as u32, bit_count);
+        }
+
+        return value;
+    }
+
+    pub fn write_normal_vector(&mut self, value: (f32, f32, f32), bit_count: usize) -> (f32, f32, f32) {
+        let phi = value.0.atan2(value.1) / PI;
+        let theta = value.2.atan2((value.0 * value.0 + value.1 * value.1).sqrt()) / (PI / 2.0);
+
+        self.write_signed_float(phi, bit_count + 1);
+        self.write_signed_float(theta, bit_count);
+
+        (
+            phi.sin() * theta.cos(),
+            phi.cos() * theta.cos(),
+            theta.sin()
+        )
+    }
+
+    pub fn write_vector(&mut self, value: (f32, f32, f32), max_magnitude: f32, magnitude_bits: usize, normal_bits: usize) -> (f32, f32, f32) {
+        let mag = (value.0 * value.0 + value.1 * value.1 + value.2 * value.2).sqrt();
+        if mag < POINT_EPSILON {
+            self.write_flag(false);
+            return (0.0, 0.0, 0.0);
+        }
+
+        if mag < max_magnitude {
+            self.write_flag(true);
+            self.write_float(mag / max_magnitude, magnitude_bits);
+        } else {
+            self.write_int(mag.to_bits(), 32);
+        }
+
+        let div = (1.0 / mag);
+
+        self.write_normal_vector((
+            value.0 * div,
+            value.1 * div,
+            value.2 * div,
+        ), normal_bits);
+
+        return (
+            (value.0 * div) * mag,
+            (value.1 * div) * mag,
+            (value.2 * div) * mag,
+        );
+    }
+
+    pub fn write_quat(&mut self, value: (f32, f32, f32, f32), bit_count: usize) -> (f32, f32, f32, f32) {
+        let mut vals = [value.0, value.1, value.2, value.3];
+        let mut flip = vals[0] < 0.0;
+        let mut max_val = vals[0].abs();
+        let mut idx_max = 0;
+
+        for i in 1..4 {
+            if vals[i].abs() > max_val {
+                idx_max = i;
+                max_val = vals[i].abs();
+                flip = vals[i] < 0.0;
+            }
+        }
+
+        self.write_int(idx_max as u32, 2);
+
+        for i in 0..4 {
+            if i == idx_max {
+                continue;
+            }
+            let cur_value = if flip {
+                -vals[i]
+            } else {
+                vals[i]
+            } * SQRT_2;
+            self.write_signed_float(cur_value, bit_count);
+        }
+
+        value
+    }
+
+    pub fn write_ranged_u32(&mut self, value: u32, range_start: u32, range_end: u32) -> u32 {
+        let range_size = range_end - range_start + 1;
+        let range_bits = range_size.next_power_of_two().trailing_zeros();
+
+        self.write_int(value - range_start, range_bits as usize);
+        return value;
+    }
+
+    pub fn write_cussed_u32(&mut self, value: u32) -> u32 {
+        if self.write_flag(value == 0) {
+            return 0;
+        } else if self.write_flag(value <= 0xF) {
+            return self.write_ranged_u32(value, 0, 0xF);
+        } else if self.write_flag(value <= 0xFF) {
+            return self.write_ranged_u32(value, 0, 0xFF);
+        } else if self.write_flag(value <= 0xFFFF) {
+            return self.write_ranged_u32(value, 0, 0xFFFF);
+        } else if self.write_flag(value <= 0xFFFFFF) {
+            return self.write_ranged_u32(value, 0, 0xFFFFFF);
+        } else {
+            return self.write_ranged_u32(value, 0, 0xFFFFFFFF);
+        }
     }
 }
