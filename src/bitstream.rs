@@ -1,7 +1,5 @@
 
-use crate::huffman;
 use crate::huffman::HuffmanProcessor;
-use std::cmp::max;
 use std::f32::consts::{PI, FRAC_1_SQRT_2, SQRT_2};
 
 const POINT_EPSILON: f32 = 0.0001f32;
@@ -65,7 +63,7 @@ impl BitStream {
             return 0;
         }
 
-        let mut result = 0;
+        let mut result;
 
         //If this value is going to push us onto the next item we need to do
         // some extra fun math.
@@ -112,7 +110,7 @@ impl BitStream {
         }
 
         //Sanitize value, don't let it be longer than the number of bits we're promised
-        value = (value & (0xFF >> (8 - bits)));
+        value = value & (0xFF >> (8 - bits));
 
         //If this value is going to push us onto the next item we need to do
         // some extra fun math.
@@ -139,7 +137,7 @@ impl BitStream {
             let second = if remain == 8 {
                 0
             } else if extra == 0 {
-                (value >> remain)
+                value >> remain
             } else {
                 (value >> remain) & (0xFF >> (8 - extra))
             };
@@ -214,6 +212,24 @@ impl BitStream {
         HuffmanProcessor::read_string(self)
     }
 
+    pub fn read_cstring(&mut self) -> String {
+        let len = self.read_u8();
+        let mut chars = vec![];
+        for _ in 0..len {
+            chars.push(self.read_u8());
+        }
+        return chars.into_iter().map(|c| c as char).collect();
+    }
+
+    pub fn read_long_cstring(&mut self) -> String {
+        let len = self.read_u16();
+        let mut chars = vec![];
+        for _ in 0..len {
+            chars.push(self.read_u8());
+        }
+        return chars.into_iter().map(|c| c as char).collect();
+    }
+
     pub fn read_float_zero_to_one(&mut self, bit_count: usize) -> f32 {
         let max_int = (1u32 << bit_count) - 1;
         let i = self.read_int(bit_count);
@@ -230,7 +246,7 @@ impl BitStream {
     }
 
     pub fn read_signed_float_neg_one_to_one(&mut self, bit_count: usize) -> f32 {
-        return self.read_float(bit_count) * 2f32 - 1f32;
+        return self.read_float_zero_to_one(bit_count) * 2f32 - 1f32;
     }
 
     pub fn read_signed_int(&mut self, bit_count: usize) -> i32 {
@@ -243,8 +259,8 @@ impl BitStream {
     }
 
     pub fn read_normal_vector(&mut self, bit_count: usize) -> (f32, f32, f32) {
-        let phi = self.read_signed_float(bit_count + 1) * PI;
-        let theta = self.read_signed_float(bit_count) * (PI / 2.0);
+        let phi = self.read_signed_float_neg_one_to_one(bit_count + 1) * PI;
+        let theta = self.read_signed_float_neg_one_to_one(bit_count) * (PI / 2.0);
 
         (
             phi.sin() * theta.cos(),
@@ -258,9 +274,9 @@ impl BitStream {
             return (0.0, 0.0, 0.0);
         }
 
-        let mut mag;
+        let mag;
         if self.read_flag() {
-            mag = self.read_float(magnitude_bits) * max_magnitude;
+            mag = self.read_float_zero_to_one(magnitude_bits) * max_magnitude;
         } else {
             mag = f32::from_bits(self.read_int(32));
         }
@@ -277,12 +293,12 @@ impl BitStream {
         let mut vals = [0f32; 4];
         let mut sum = 0f32;
 
-        let idx_max = self.read_int(2);
+        let idx_max = self.read_int(2) as usize;
         for i in 0..4 {
             if i == idx_max {
                 continue;
             }
-            vals[i] = self.read_signed_float(bit_count) * FRAC_1_SQRT_2;
+            vals[i] = self.read_signed_float_neg_one_to_one(bit_count) * FRAC_1_SQRT_2;
             sum += vals[i] * vals[i];
         }
 
@@ -344,9 +360,27 @@ impl BitStream {
         return value;
     }
 
+    pub fn write_cstring(&mut self, value: String) -> String {
+        assert!(value.len() < 256);
+        self.write_u8(value.len() as u8);
+        for ch in value.chars() {
+            self.write_u8(ch as u8);
+        }
+        return value;
+    }
+
+    pub fn write_long_cstring(&mut self, value: String) -> String {
+        assert!(value.len() < 65536);
+        self.write_u16(value.len() as u16);
+        for ch in value.chars() {
+            self.write_u8(ch as u8);
+        }
+        return value;
+    }
+
     pub fn write_float_zero_to_one(&mut self, mut value: f32, bit_count: usize) -> f32 {
         let max_int = (1u32 << bit_count) - 1;
-        let mut i;
+        let i;
         if value < POINT_EPSILON {
             i = 0;
             value = 0.0;
@@ -357,7 +391,7 @@ impl BitStream {
             i = max_int;
             value = 1.0;
         } else {
-            i = (f * (max_int as f32)).round();
+            i = (value * (max_int as f32)).round() as u32;
             value = (i as f32) / (max_int as f32);
         }
 
@@ -367,7 +401,7 @@ impl BitStream {
     }
 
     pub fn write_signed_float_neg_one_to_one(&mut self, value: f32, bit_count: usize) -> f32 {
-        return self.write_float((value + 1) / 2, bit_count) * 2f32 - 1f32;
+        return self.write_float_zero_to_one((value + 1f32) / 2f32, bit_count) * 2f32 - 1f32;
     }
 
     pub fn write_signed_int(&mut self, value: i32, bit_count: usize) -> i32 {
@@ -387,8 +421,8 @@ impl BitStream {
         let phi = value.0.atan2(value.1) / PI;
         let theta = value.2.atan2((value.0 * value.0 + value.1 * value.1).sqrt()) / (PI / 2.0);
 
-        self.write_signed_float(phi, bit_count + 1);
-        self.write_signed_float(theta, bit_count);
+        self.write_signed_float_neg_one_to_one(phi, bit_count + 1);
+        self.write_signed_float_neg_one_to_one(theta, bit_count);
 
         (
             phi.sin() * theta.cos(),
@@ -406,12 +440,12 @@ impl BitStream {
 
         if mag < max_magnitude {
             self.write_flag(true);
-            self.write_float(mag / max_magnitude, magnitude_bits);
+            self.write_float_zero_to_one(mag / max_magnitude, magnitude_bits);
         } else {
             self.write_int(mag.to_bits(), 32);
         }
 
-        let div = (1.0 / mag);
+        let div = 1.0 / mag;
 
         self.write_normal_vector((
             value.0 * div,
@@ -427,7 +461,7 @@ impl BitStream {
     }
 
     pub fn write_quat(&mut self, value: (f32, f32, f32, f32), bit_count: usize) -> (f32, f32, f32, f32) {
-        let mut vals = [value.0, value.1, value.2, value.3];
+        let vals = [value.0, value.1, value.2, value.3];
         let mut flip = vals[0] < 0.0;
         let mut max_val = vals[0].abs();
         let mut idx_max = 0;
@@ -451,7 +485,7 @@ impl BitStream {
             } else {
                 vals[i]
             } * SQRT_2;
-            self.write_signed_float(cur_value, bit_count);
+            self.write_signed_float_neg_one_to_one(cur_value, bit_count);
         }
 
         value

@@ -557,10 +557,10 @@ impl HuffmanProcessor {
         let mut buffer = [0u8; 256];
         let length = Self::read_buffer(stream, &mut buffer);
 
-        return String::from_utf8_lossy(&buffer[0..length]).into_owned();
+        return buffer[0..length].iter().map(|&c| c as char).collect();
     }
 
     pub fn write_string(stream: &mut BitStream, value: &String) -> usize {
-        Self::write_buffer(stream, Some(value.as_bytes()), 256)
+        Self::write_buffer(stream, Some(value.chars().into_iter().map(|c| c as u8).collect::<Vec<u8>>().as_slice()), 256)
     }
 }

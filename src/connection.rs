@@ -14,7 +14,7 @@ pub struct GameConnection {
 }
 
 impl GameConnection {
-    pub async fn connect<A: ToSocketAddrs>(bind_address: A, connect_address: A, connect_sequence: u32) -> Result<Self> {
+    pub async fn connect<B: ToSocketAddrs, C: ToSocketAddrs>(bind_address: B, connect_address: C, connect_sequence: u32) -> Result<Self> {
         let socket = UdpSocket::bind(bind_address).await?;
         let std_socket = socket.into_std()?;
         std_socket.set_write_timeout(Some(Duration::from_secs(30)))?;
@@ -58,7 +58,7 @@ impl GameConnection {
         Ok(packet)
     }
 
-    pub async fn process_raw_packet(&mut self, mut stream: BitStream) -> Result<()> {
+    pub async fn process_raw_packet(&mut self, stream: BitStream) -> Result<()> {
         for result in self.dnet.process_raw_packet(stream)? {
             match result {
                 DNetResult::SendPacket(packet) => {

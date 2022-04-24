@@ -1,4 +1,3 @@
-use crate::connection::GameConnection;
 use anyhow::{Error, Result};
 use crate::bitstream::BitStream;
 
@@ -70,7 +69,7 @@ impl DNet {
         let ack_mask = stream.read_int((8 * ack_byte_count) as usize);
 
         // Check if packet number is within sequence window
-        seq_num |= (self.last_seq_received & 0xFFFFFE00);
+        seq_num |= self.last_seq_received & 0xFFFFFE00;
 
         if seq_num < self.last_seq_received {
             seq_num += 0x200;
@@ -161,7 +160,7 @@ impl DNet {
     }
 
     pub fn build_send_packet_header(&mut self, stream: &mut BitStream, packet_type: NetPacketType) {
-        let ack_byte_count = ((self.last_seq_received - self.last_recv_ack_ack + 7) >> 3);
+        let ack_byte_count = (self.last_seq_received - self.last_recv_ack_ack + 7) >> 3;
         assert!(ack_byte_count <= 4);
 
         if packet_type == NetPacketType::DataPacket {
