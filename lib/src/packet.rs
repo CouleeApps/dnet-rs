@@ -24,6 +24,26 @@ pub mod PacketTypes {
     pub const ConnectReject: u8 = 34;
     pub const ConnectAccept: u8 = 36;
     pub const Disconnect: u8 = 38;
+
+    /// OpenMBU Hole Punching Extensions
+
+    pub const Punch: u8 = 40;
+    pub const ArrangedConnectRequest: u8 = 42;
+    pub const MasterServerRequestArrangedConnection: u8 = 46;
+    pub const MasterServerClientRequestedArrangedConnection: u8 = 48;
+    pub const MasterServerAcceptArrangedConnection: u8 = 50;
+    pub const MasterServerArrangedConnectionAccepted: u8 = 52;
+    pub const MasterServerRejectArrangedConnection: u8 = 54;
+    pub const MasterServerArrangedConnectionRejected: u8 = 56;
+    pub const MasterServerGamePingRequest: u8 = 58;
+    pub const MasterServerGamePingResponse: u8 = 60;
+    pub const MasterServerGameInfoRequest: u8 = 62;
+    pub const MasterServerGameInfoResponse: u8 = 64;
+    pub const MasterServerRelayRequest: u8 = 66;
+    pub const MasterServerRelayResponse: u8 = 68;
+    pub const MasterServerRelayReady: u8 = 72;
+    pub const MasterServerJoinInvite: u8 = 74;
+    pub const MasterServerJoinInviteResponse: u8 = 76;
 }
 
 pub mod NetClassGroups {
@@ -173,6 +193,71 @@ pub enum Packet {
     Disconnect {
         sequence: u32,
         reason: String,
+    },
+    Punch {},
+    ArrangedConnectRequest {
+        sequence: u32,
+        debug_object_sizes: bool,
+    },
+    MasterServerRequestArrangedConnection {
+        address: (Ipv4Addr, u16),
+    },
+    MasterServerClientRequestedArrangedConnection {
+        client_id: u16,
+        possible_addresses: Vec<(Ipv4Addr, u16)>,
+    },
+    MasterServerAcceptArrangedConnection {
+        client_id: u16,
+    },
+    MasterServerArrangedConnectionAccepted {
+        possible_addresses: Vec<(Ipv4Addr, u16)>,
+    },
+    MasterServerRejectArrangedConnection {
+        reason: u8, // todo: not implemented in engine
+    },
+    MasterServerArrangedConnectionRejected {
+        reason: u8, // todo: not implemented in engine
+    },
+    MasterServerGamePingRequest {
+        address: (Ipv4Addr, u16),
+        flags: u8,
+        key: u16,
+        session: u16,
+    },
+    MasterServerGamePingResponse {
+        address: (Ipv4Addr, u16),
+        cmd: u8,
+        flags: u8,
+        key: u32,
+    },
+    MasterServerGameInfoRequest {
+        address: (Ipv4Addr, u16),
+        flags: u8,
+        key: u16,
+        session: u16,
+    },
+    MasterServerGameInfoResponse {
+        address: (Ipv4Addr, u16),
+        cmd: u8,
+        flags: u8,
+        key: u32,
+    },
+    MasterServerRelayRequest {
+        address: (Ipv4Addr, u16),
+    },
+    MasterServerRelayResponse {
+        is_host: bool,
+        address: (Ipv4Addr, u16),
+    },
+    MasterServerRelayReady {},
+    MasterServerJoinInvite {
+        invite_code: String,
+    },
+    MasterServerJoinInviteResponse {
+        flags: u8,
+        key: u32,
+        found: u8,
+        address: (Ipv4Addr, u16),
     },
 }
 
@@ -500,6 +585,214 @@ impl Packet {
 
                 Some(Self::Disconnect { sequence, reason })
             }
+            PacketTypes::Punch => Some(Self::Punch {}),
+            PacketTypes::ArrangedConnectRequest => {
+                let sequence = stream.read_u32();
+                let debug_object_sizes = stream.read_flag();
+
+                Some(Self::ArrangedConnectRequest {
+                    sequence,
+                    debug_object_sizes,
+                })
+            }
+            PacketTypes::MasterServerRequestArrangedConnection => {
+                let address = Ipv4Addr::new(
+                    stream.read_u8(),
+                    stream.read_u8(),
+                    stream.read_u8(),
+                    stream.read_u8(),
+                );
+                let port = stream.read_u16();
+
+                Some(Self::MasterServerRequestArrangedConnection {
+                    address: (address, port),
+                })
+            }
+            PacketTypes::MasterServerClientRequestedArrangedConnection => {
+                let client_id = stream.read_u16();
+                let mut possible_addresses = vec![];
+
+                let possible_address_len = stream.read_u8();
+                for _ in 0..possible_address_len {
+                    possible_addresses.push((
+                        Ipv4Addr::new(
+                            stream.read_u8(),
+                            stream.read_u8(),
+                            stream.read_u8(),
+                            stream.read_u8(),
+                        ),
+                        stream.read_u16(),
+                    ));
+                }
+
+                Some(Self::MasterServerClientRequestedArrangedConnection {
+                    client_id,
+                    possible_addresses,
+                })
+            }
+            PacketTypes::MasterServerAcceptArrangedConnection => {
+                let client_id = stream.read_u16();
+
+                Some(Self::MasterServerAcceptArrangedConnection { client_id })
+            }
+            PacketTypes::MasterServerArrangedConnectionAccepted => {
+                let mut possible_addresses = vec![];
+
+                let possible_address_len = stream.read_u8();
+                for _ in 0..possible_address_len {
+                    possible_addresses.push((
+                        Ipv4Addr::new(
+                            stream.read_u8(),
+                            stream.read_u8(),
+                            stream.read_u8(),
+                            stream.read_u8(),
+                        ),
+                        stream.read_u16(),
+                    ));
+                }
+
+                Some(Self::MasterServerArrangedConnectionAccepted { possible_addresses })
+            }
+            PacketTypes::MasterServerRejectArrangedConnection => {
+                let reason = stream.read_u8();
+                Some(Self::MasterServerRejectArrangedConnection { reason })
+            }
+            PacketTypes::MasterServerArrangedConnectionRejected => {
+                let reason = stream.read_u8();
+                Some(Self::MasterServerArrangedConnectionRejected { reason })
+            }
+            PacketTypes::MasterServerGamePingRequest => {
+                let address = (
+                    Ipv4Addr::new(
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                    ),
+                    stream.read_u16(),
+                );
+                let flags = stream.read_u8();
+                let key_session = stream.read_u32();
+                let key = (key_session >> 16) as u16;
+                let session = (key_session & 0xffff) as u16;
+                Some(Self::MasterServerGamePingRequest {
+                    address,
+                    flags,
+                    key,
+                    session,
+                })
+            }
+            PacketTypes::MasterServerGamePingResponse => {
+                let address = (
+                    Ipv4Addr::new(
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                    ),
+                    stream.read_u16(),
+                );
+                let cmd = stream.read_u8();
+                let flags = stream.read_u8();
+                let key = stream.read_u32();
+                Some(Self::MasterServerGamePingResponse {
+                    address,
+                    cmd,
+                    flags,
+                    key,
+                })
+            }
+            PacketTypes::MasterServerGameInfoRequest => {
+                let address = (
+                    Ipv4Addr::new(
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                    ),
+                    stream.read_u16(),
+                );
+                let flags = stream.read_u8();
+                let key_session = stream.read_u32();
+                let key = (key_session >> 16) as u16;
+                let session = (key_session & 0xffff) as u16;
+                Some(Self::MasterServerGameInfoRequest {
+                    address,
+                    flags,
+                    key,
+                    session,
+                })
+            }
+            PacketTypes::MasterServerGameInfoResponse => {
+                let address = (
+                    Ipv4Addr::new(
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                    ),
+                    stream.read_u16(),
+                );
+                let cmd = stream.read_u8();
+                let flags = stream.read_u8();
+                let key = stream.read_u32();
+                Some(Self::MasterServerGameInfoResponse {
+                    address,
+                    cmd,
+                    flags,
+                    key,
+                })
+            }
+            PacketTypes::MasterServerRelayRequest => {
+                let address = Ipv4Addr::new(
+                    stream.read_u8(),
+                    stream.read_u8(),
+                    stream.read_u8(),
+                    stream.read_u8(),
+                );
+                let port = stream.read_u16();
+                Some(Self::MasterServerRelayRequest {
+                    address: (address, port),
+                })
+            }
+            PacketTypes::MasterServerRelayResponse => {
+                let is_host = stream.read_flag();
+                let address = (
+                    Ipv4Addr::new(
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                    ),
+                    stream.read_u16(),
+                );
+                Some(Self::MasterServerRelayResponse { is_host, address })
+            }
+            PacketTypes::MasterServerRelayReady => Some(Self::MasterServerRelayReady {}),
+            PacketTypes::MasterServerJoinInvite => {
+                let invite_code = stream.read_cstring();
+                Some(Self::MasterServerJoinInvite { invite_code })
+            }
+            PacketTypes::MasterServerJoinInviteResponse => {
+                let flags = stream.read_u8();
+                let key = stream.read_u32();
+                let found = stream.read_u8();
+                let address = (
+                    Ipv4Addr::new(
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                        stream.read_u8(),
+                    ),
+                    stream.read_u16(),
+                );
+                Some(Self::MasterServerJoinInviteResponse {
+                    flags,
+                    key,
+                    found,
+                    address,
+                })
+            }
             _ => {
                 todo!("Unknown packet type: {} {:?}", packet_type, bytes)
             }
@@ -517,7 +810,7 @@ impl Packet {
                 key,
                 session,
             } => {
-                out.write_u8(PacketTypes::MasterServerGameTypesRequest as u8);
+                out.write_u8(PacketTypes::MasterServerGameTypesRequest);
                 out.write_u8(flags);
                 out.write_u32((session as u32) << 16 | key as u32);
             }
@@ -527,7 +820,7 @@ impl Packet {
                 game_types,
                 mission_types,
             } => {
-                out.write_u8(PacketTypes::MasterServerGameTypesResponse as u8);
+                out.write_u8(PacketTypes::MasterServerGameTypesResponse);
                 out.write_u8(flags);
                 out.write_u32(key);
 
@@ -556,7 +849,7 @@ impl Packet {
                 min_cpu,
                 buddy_list,
             } => {
-                out.write_u8(PacketTypes::MasterServerListRequest as u8);
+                out.write_u8(PacketTypes::MasterServerListRequest);
                 out.write_u8(flags);
                 out.write_u32((session as u32) << 16 | key as u32);
                 out.write_u8(packet_index);
@@ -585,7 +878,7 @@ impl Packet {
                 packet_total,
                 servers,
             } => {
-                out.write_u8(PacketTypes::MasterServerListResponse as u8);
+                out.write_u8(PacketTypes::MasterServerListResponse);
                 out.write_u8(flags);
                 out.write_u32(key);
                 out.write_u8(packet_index);
@@ -601,7 +894,7 @@ impl Packet {
                 }
             }
             Packet::GameMasterInfoRequest { flags, key } => {
-                out.write_u8(PacketTypes::GameMasterInfoRequest as u8);
+                out.write_u8(PacketTypes::GameMasterInfoRequest);
                 out.write_u8(flags);
                 out.write_u32(key);
             }
@@ -619,7 +912,7 @@ impl Packet {
                 player_count,
                 guid_list,
             } => {
-                out.write_u8(PacketTypes::GameMasterInfoResponse as u8);
+                out.write_u8(PacketTypes::GameMasterInfoResponse);
                 out.write_u8(flags);
                 out.write_u32(key);
                 out.write_cstring(game_type);
@@ -640,7 +933,7 @@ impl Packet {
                 }
             }
             Packet::GamePingRequest { flags, key } => {
-                out.write_u8(PacketTypes::GamePingRequest as u8);
+                out.write_u8(PacketTypes::GamePingRequest);
                 out.write_u8(flags);
                 out.write_u32(key);
             }
@@ -653,7 +946,7 @@ impl Packet {
                 version,
                 name,
             } => {
-                out.write_u8(PacketTypes::GamePingResponse as u8);
+                out.write_u8(PacketTypes::GamePingResponse);
                 out.write_u8(flags);
                 out.write_u32(key);
                 Self::write_maybe_compressed_string(&mut out, flags, version_string);
@@ -663,7 +956,7 @@ impl Packet {
                 Self::write_maybe_compressed_string(&mut out, flags, name);
             }
             Packet::GameInfoRequest { flags, key } => {
-                out.write_u8(PacketTypes::GameInfoRequest as u8);
+                out.write_u8(PacketTypes::GameInfoRequest);
                 out.write_u8(flags);
                 out.write_u32(key);
             }
@@ -681,7 +974,7 @@ impl Packet {
                 server_info,
                 server_info_query,
             } => {
-                out.write_u8(PacketTypes::GameInfoResponse as u8);
+                out.write_u8(PacketTypes::GameInfoResponse);
                 out.write_u8(flags);
                 out.write_u32(key);
                 Self::write_maybe_compressed_string(&mut out, flags, game_type);
@@ -700,20 +993,20 @@ impl Packet {
                 key,
                 session,
             } => {
-                out.write_u8(PacketTypes::GameHeartbeat as u8);
+                out.write_u8(PacketTypes::GameHeartbeat);
                 out.write_u8(flags);
                 out.write_u32((session as u32) << 16 | key as u32);
             }
             Packet::GGCPacket {} => {
-                out.write_u8(PacketTypes::GGCPacket as u8);
+                out.write_u8(PacketTypes::GGCPacket);
                 todo!();
             }
             Packet::ConnectChallengeRequest { sequence } => {
-                out.write_u8(PacketTypes::ConnectChallengeRequest as u8);
+                out.write_u8(PacketTypes::ConnectChallengeRequest);
                 out.write_u32(sequence);
             }
             Packet::ConnectChallengeReject { sequence, reason } => {
-                out.write_u8(PacketTypes::ConnectChallengeReject as u8);
+                out.write_u8(PacketTypes::ConnectChallengeReject);
                 out.write_u32(sequence);
                 out.write_string(reason);
             }
@@ -721,7 +1014,7 @@ impl Packet {
                 sequence,
                 address_digest,
             } => {
-                out.write_u8(PacketTypes::ConnectChallengeResponse as u8);
+                out.write_u8(PacketTypes::ConnectChallengeResponse);
                 out.write_u32(sequence);
                 out.write_u32(address_digest[0]);
                 out.write_u32(address_digest[1]);
@@ -740,7 +1033,7 @@ impl Packet {
                 join_password,
                 connect_argv,
             } => {
-                out.write_u8(PacketTypes::ConnectRequest as u8);
+                out.write_u8(PacketTypes::ConnectRequest);
                 out.write_u32(sequence);
                 out.write_u32(address_digest[0]);
                 out.write_u32(address_digest[1]);
@@ -764,7 +1057,7 @@ impl Packet {
                 }
             }
             Packet::ConnectReject { sequence, reason } => {
-                out.write_u8(PacketTypes::ConnectReject as u8);
+                out.write_u8(PacketTypes::ConnectReject);
                 out.write_u32(sequence);
                 out.write_string(reason);
             }
@@ -772,7 +1065,7 @@ impl Packet {
                 sequence,
                 protocol_version,
             } => {
-                out.write_u8(PacketTypes::ConnectAccept as u8);
+                out.write_u8(PacketTypes::ConnectAccept);
                 out.write_u32(sequence);
 
                 // NetConnection::readConnectAccept
@@ -780,9 +1073,175 @@ impl Packet {
                 out.write_u32(protocol_version);
             }
             Packet::Disconnect { sequence, reason } => {
-                out.write_u8(PacketTypes::Disconnect as u8);
+                out.write_u8(PacketTypes::Disconnect);
                 out.write_u32(sequence);
                 out.write_string(reason);
+            }
+            Packet::Punch {} => {
+                out.write_u8(PacketTypes::Punch);
+            }
+            Packet::ArrangedConnectRequest {
+                sequence,
+                debug_object_sizes,
+            } => {
+                out.write_u8(PacketTypes::ArrangedConnectRequest);
+                out.write_u32(sequence);
+                out.write_flag(debug_object_sizes);
+            }
+            Packet::MasterServerRequestArrangedConnection {
+                address: (address, port),
+            } => {
+                out.write_u8(PacketTypes::MasterServerRequestArrangedConnection);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
+            }
+            Packet::MasterServerClientRequestedArrangedConnection {
+                client_id,
+                possible_addresses,
+            } => {
+                out.write_u8(PacketTypes::MasterServerClientRequestedArrangedConnection);
+                out.write_u16(client_id);
+                out.write_u8(possible_addresses.len() as u8);
+                for (address, port) in possible_addresses {
+                    out.write_u8(address.octets()[0]);
+                    out.write_u8(address.octets()[1]);
+                    out.write_u8(address.octets()[2]);
+                    out.write_u8(address.octets()[3]);
+                    out.write_u16(port);
+                }
+            }
+            Packet::MasterServerAcceptArrangedConnection { client_id } => {
+                out.write_u8(PacketTypes::MasterServerAcceptArrangedConnection);
+                out.write_u16(client_id);
+            }
+            Packet::MasterServerArrangedConnectionAccepted { possible_addresses } => {
+                out.write_u8(PacketTypes::MasterServerArrangedConnectionAccepted);
+                out.write_u8(possible_addresses.len() as u8);
+                for (address, port) in possible_addresses {
+                    out.write_u8(address.octets()[0]);
+                    out.write_u8(address.octets()[1]);
+                    out.write_u8(address.octets()[2]);
+                    out.write_u8(address.octets()[3]);
+                    out.write_u16(port);
+                }
+            }
+            Packet::MasterServerRejectArrangedConnection { reason } => {
+                out.write_u8(PacketTypes::MasterServerRejectArrangedConnection);
+                out.write_u8(reason);
+            }
+            Packet::MasterServerArrangedConnectionRejected { reason } => {
+                out.write_u8(PacketTypes::MasterServerArrangedConnectionRejected);
+                out.write_u8(reason);
+            }
+            Packet::MasterServerGamePingRequest {
+                address: (address, port),
+                flags,
+                key,
+                session,
+            } => {
+                out.write_u8(PacketTypes::MasterServerGamePingRequest);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
+                out.write_u8(flags);
+                out.write_u32(((session as u32) << 16) | ((key as u32) & 0xffff));
+            }
+            Packet::MasterServerGamePingResponse {
+                address: (address, port),
+                cmd,
+                flags,
+                key,
+            } => {
+                out.write_u8(PacketTypes::MasterServerGamePingResponse);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
+                out.write_u8(cmd);
+                out.write_u8(flags);
+                out.write_u32(key);
+            }
+            Packet::MasterServerGameInfoRequest {
+                address: (address, port),
+                flags,
+                key,
+                session,
+            } => {
+                out.write_u8(PacketTypes::MasterServerGameInfoRequest);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
+                out.write_u8(flags);
+                out.write_u32(((session as u32) << 16) | ((key as u32) & 0xffff));
+            }
+            Packet::MasterServerGameInfoResponse {
+                address: (address, port),
+                cmd,
+                flags,
+                key,
+            } => {
+                out.write_u8(PacketTypes::MasterServerGameInfoResponse);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
+                out.write_u8(cmd);
+                out.write_u8(flags);
+                out.write_u32(key);
+            }
+            Packet::MasterServerRelayRequest {
+                address: (address, port),
+            } => {
+                out.write_u8(PacketTypes::MasterServerRelayRequest);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
+            }
+            Packet::MasterServerRelayResponse {
+                is_host,
+                address: (address, port),
+            } => {
+                out.write_u8(PacketTypes::MasterServerRelayResponse);
+                out.write_flag(is_host);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
+            }
+            Packet::MasterServerRelayReady {} => {
+                out.write_u8(PacketTypes::MasterServerRelayReady);
+            }
+            Packet::MasterServerJoinInvite { invite_code } => {
+                out.write_u8(PacketTypes::MasterServerJoinInvite);
+                out.write_cstring(invite_code);
+            }
+            Packet::MasterServerJoinInviteResponse {
+                flags,
+                key,
+                found,
+                address: (address, port),
+            } => {
+                out.write_u8(PacketTypes::MasterServerJoinInviteResponse);
+                out.write_u8(flags);
+                out.write_u32(key);
+                out.write_u8(found);
+                out.write_u8(address.octets()[0]);
+                out.write_u8(address.octets()[1]);
+                out.write_u8(address.octets()[2]);
+                out.write_u8(address.octets()[3]);
+                out.write_u16(port);
             }
         }
 
