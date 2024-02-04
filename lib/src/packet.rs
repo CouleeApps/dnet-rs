@@ -53,13 +53,13 @@ pub enum Packet {
     MasterServerGameTypesRequest {
         flags: u8,
         key: u16,
-        session: u16
+        session: u16,
     },
     MasterServerGameTypesResponse {
         flags: u8,
         key: u32,
         game_types: Vec<String>,
-        mission_types: Vec<String>
+        mission_types: Vec<String>,
     },
     MasterServerListRequest {
         flags: u8,
@@ -75,14 +75,14 @@ pub enum Packet {
         filter_flag: u8,
         max_bots: u8,
         min_cpu: u16,
-        buddy_list: Vec<u32>
+        buddy_list: Vec<u32>,
     },
     MasterServerListResponse {
         flags: u8,
         key: u32,
         packet_index: u8,
         packet_total: u8,
-        servers: Vec<(Ipv4Addr, u16)>
+        servers: Vec<(Ipv4Addr, u16)>,
     },
     GameMasterInfoRequest {
         flags: u8,
@@ -100,7 +100,7 @@ pub enum Packet {
         bot_count: u8,
         cpu_speed: u32,
         player_count: u8,
-        guid_list: Vec<u32>
+        guid_list: Vec<u32>,
     },
     GamePingRequest {
         flags: u8,
@@ -113,7 +113,7 @@ pub enum Packet {
         current_protocol_version: u32,
         min_required_protocol_version: u32,
         version: u32,
-        name: String
+        name: String,
     },
     GameInfoRequest {
         flags: u8,
@@ -131,20 +131,20 @@ pub enum Packet {
         bot_count: u8,
         cpu_speed: u16,
         server_info: String,
-        server_info_query: String
+        server_info_query: String,
     },
     GameHeartbeat {
         flags: u8,
         key: u16,
         session: u16,
     },
-    GGCPacket(),
+    GGCPacket {},
     ConnectChallengeRequest {
         sequence: u32,
     },
     ConnectChallengeReject {
         sequence: u32,
-        reason: String
+        reason: String,
     },
     ConnectChallengeResponse {
         sequence: u32,
@@ -164,7 +164,7 @@ pub enum Packet {
     },
     ConnectReject {
         sequence: u32,
-        reason: String
+        reason: String,
     },
     ConnectAccept {
         sequence: u32,
@@ -212,7 +212,7 @@ impl Packet {
                 Some(Self::MasterServerGameTypesRequest {
                     flags,
                     key,
-                    session
+                    session,
                 })
             }
             PacketTypes::MasterServerGameTypesResponse => {
@@ -291,9 +291,9 @@ impl Packet {
                             stream.read_u8(),
                             stream.read_u8(),
                             stream.read_u8(),
-                            stream.read_u8()
+                            stream.read_u8(),
                         ),
-                        stream.read_u16()
+                        stream.read_u16(),
                     ));
                 }
 
@@ -309,10 +309,7 @@ impl Packet {
                 let flags = stream.read_u8();
                 let key = stream.read_u32();
 
-                Some(Self::GameMasterInfoRequest {
-                    flags,
-                    key,
-                })
+                Some(Self::GameMasterInfoRequest { flags, key })
             }
             PacketTypes::GameMasterInfoResponse => {
                 let flags = stream.read_u8();
@@ -351,10 +348,7 @@ impl Packet {
                 let flags = stream.read_u8();
                 let key = stream.read_u32();
 
-                Some(Self::GamePingRequest {
-                    flags,
-                    key,
-                })
+                Some(Self::GamePingRequest { flags, key })
             }
             PacketTypes::GamePingResponse => {
                 let flags = stream.read_u8();
@@ -379,10 +373,7 @@ impl Packet {
                 let flags = stream.read_u8();
                 let key = stream.read_u32();
 
-                Some(Self::GameInfoRequest {
-                    flags,
-                    key,
-                })
+                Some(Self::GameInfoRequest { flags, key })
             }
             PacketTypes::GameInfoResponse => {
                 let flags = stream.read_u8();
@@ -421,7 +412,7 @@ impl Packet {
                 Some(Self::GameHeartbeat {
                     flags,
                     key,
-                    session
+                    session,
                 })
             }
             PacketTypes::GGCPacket => {
@@ -429,18 +420,13 @@ impl Packet {
             }
             PacketTypes::ConnectChallengeRequest => {
                 let sequence = stream.read_u32();
-                Some(Self::ConnectChallengeRequest {
-                    sequence
-                })
+                Some(Self::ConnectChallengeRequest { sequence })
             }
             PacketTypes::ConnectChallengeReject => {
                 let sequence = stream.read_u32();
                 let reason = stream.read_string();
 
-                Some(Self::ConnectChallengeReject {
-                    sequence,
-                    reason
-                })
+                Some(Self::ConnectChallengeReject { sequence, reason })
             }
             PacketTypes::ConnectChallengeResponse => {
                 let sequence = stream.read_u32();
@@ -448,12 +434,12 @@ impl Packet {
                     stream.read_u32(),
                     stream.read_u32(),
                     stream.read_u32(),
-                    stream.read_u32()
+                    stream.read_u32(),
                 ];
 
                 Some(Self::ConnectChallengeResponse {
                     sequence,
-                    address_digest
+                    address_digest,
                 })
             }
             PacketTypes::ConnectRequest => {
@@ -462,7 +448,7 @@ impl Packet {
                     stream.read_u32(),
                     stream.read_u32(),
                     stream.read_u32(),
-                    stream.read_u32()
+                    stream.read_u32(),
                 ];
                 let class_name = stream.read_string();
 
@@ -492,33 +478,27 @@ impl Packet {
                     current_protocol_version,
                     min_required_protocol_version,
                     join_password,
-                    connect_argv
+                    connect_argv,
                 })
             }
             PacketTypes::ConnectReject => {
                 let sequence = stream.read_u32();
                 let reason = stream.read_string();
-                Some(Self::ConnectReject {
-                    sequence,
-                    reason
-                })
+                Some(Self::ConnectReject { sequence, reason })
             }
             PacketTypes::ConnectAccept => {
                 let sequence = stream.read_u32();
                 let protocol_version = stream.read_u32();
                 Some(Self::ConnectAccept {
                     sequence,
-                    protocol_version
+                    protocol_version,
                 })
             }
             PacketTypes::Disconnect => {
                 let sequence = stream.read_u32();
                 let reason = stream.read_string();
 
-                Some(Self::Disconnect {
-                    sequence,
-                    reason
-                })
+                Some(Self::Disconnect { sequence, reason })
             }
             _ => {
                 todo!("Unknown packet type: {} {:?}", packet_type, bytes)
@@ -532,12 +512,21 @@ impl Packet {
             Packet::Raw(raw_packet) => {
                 return raw_packet.into_bytes();
             }
-            Packet::MasterServerGameTypesRequest { flags, key, session } => {
+            Packet::MasterServerGameTypesRequest {
+                flags,
+                key,
+                session,
+            } => {
                 out.write_u8(PacketTypes::MasterServerGameTypesRequest as u8);
                 out.write_u8(flags);
                 out.write_u32((session as u32) << 16 | key as u32);
-            },
-            Packet::MasterServerGameTypesResponse { flags, key, game_types, mission_types } => {
+            }
+            Packet::MasterServerGameTypesResponse {
+                flags,
+                key,
+                game_types,
+                mission_types,
+            } => {
                 out.write_u8(PacketTypes::MasterServerGameTypesResponse as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
@@ -550,8 +539,23 @@ impl Packet {
                 for mission_type in mission_types {
                     out.write_cstring(mission_type);
                 }
-            },
-            Packet::MasterServerListRequest { flags, key, session, packet_index, game_type, mission_type, min_players, max_players, region_mask, version, filter_flag, max_bots, min_cpu, buddy_list, } => {
+            }
+            Packet::MasterServerListRequest {
+                flags,
+                key,
+                session,
+                packet_index,
+                game_type,
+                mission_type,
+                min_players,
+                max_players,
+                region_mask,
+                version,
+                filter_flag,
+                max_bots,
+                min_cpu,
+                buddy_list,
+            } => {
                 out.write_u8(PacketTypes::MasterServerListRequest as u8);
                 out.write_u8(flags);
                 out.write_u32((session as u32) << 16 | key as u32);
@@ -573,8 +577,14 @@ impl Packet {
                 for buddy in buddy_list {
                     out.write_u32(buddy);
                 }
-            },
-            Packet::MasterServerListResponse { flags, key, packet_index, packet_total, servers } => {
+            }
+            Packet::MasterServerListResponse {
+                flags,
+                key,
+                packet_index,
+                packet_total,
+                servers,
+            } => {
                 out.write_u8(PacketTypes::MasterServerListResponse as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
@@ -589,13 +599,26 @@ impl Packet {
                     out.write_u8(server.0.octets()[3]);
                     out.write_u16(server.1);
                 }
-            },
+            }
             Packet::GameMasterInfoRequest { flags, key } => {
                 out.write_u8(PacketTypes::GameMasterInfoRequest as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
-            },
-            Packet::GameMasterInfoResponse { flags, key, game_type, mission_type, max_players, region_mask, version, filter_flag, bot_count, cpu_speed, player_count, guid_list } => {
+            }
+            Packet::GameMasterInfoResponse {
+                flags,
+                key,
+                game_type,
+                mission_type,
+                max_players,
+                region_mask,
+                version,
+                filter_flag,
+                bot_count,
+                cpu_speed,
+                player_count,
+                guid_list,
+            } => {
                 out.write_u8(PacketTypes::GameMasterInfoResponse as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
@@ -615,13 +638,21 @@ impl Packet {
                 for _ in guid_list.len()..(player_count as usize) {
                     out.write_u32(0);
                 }
-            },
+            }
             Packet::GamePingRequest { flags, key } => {
                 out.write_u8(PacketTypes::GamePingRequest as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
-            },
-            Packet::GamePingResponse { flags, key, version_string, current_protocol_version, min_required_protocol_version, version, name } => {
+            }
+            Packet::GamePingResponse {
+                flags,
+                key,
+                version_string,
+                current_protocol_version,
+                min_required_protocol_version,
+                version,
+                name,
+            } => {
                 out.write_u8(PacketTypes::GamePingResponse as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
@@ -630,13 +661,26 @@ impl Packet {
                 out.write_u32(min_required_protocol_version);
                 out.write_u32(version);
                 Self::write_maybe_compressed_string(&mut out, flags, name);
-            },
+            }
             Packet::GameInfoRequest { flags, key } => {
                 out.write_u8(PacketTypes::GameInfoRequest as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
-            },
-            Packet::GameInfoResponse { flags, key, game_type, mission_type, mission_name, filter_flag, player_count, max_players, bot_count, cpu_speed, server_info, server_info_query } => {
+            }
+            Packet::GameInfoResponse {
+                flags,
+                key,
+                game_type,
+                mission_type,
+                mission_name,
+                filter_flag,
+                player_count,
+                max_players,
+                bot_count,
+                cpu_speed,
+                server_info,
+                server_info_query,
+            } => {
                 out.write_u8(PacketTypes::GameInfoResponse as u8);
                 out.write_u8(flags);
                 out.write_u32(key);
@@ -650,34 +694,52 @@ impl Packet {
                 out.write_u16(cpu_speed);
                 Self::write_maybe_compressed_string(&mut out, flags, server_info);
                 out.write_long_cstring(server_info_query);
-            },
-            Packet::GameHeartbeat { flags, key, session } => {
+            }
+            Packet::GameHeartbeat {
+                flags,
+                key,
+                session,
+            } => {
                 out.write_u8(PacketTypes::GameHeartbeat as u8);
                 out.write_u8(flags);
                 out.write_u32((session as u32) << 16 | key as u32);
-            },
-            Packet::GGCPacket() => {
+            }
+            Packet::GGCPacket {} => {
                 out.write_u8(PacketTypes::GGCPacket as u8);
                 todo!();
             }
             Packet::ConnectChallengeRequest { sequence } => {
                 out.write_u8(PacketTypes::ConnectChallengeRequest as u8);
                 out.write_u32(sequence);
-            },
-            Packet::ConnectChallengeReject { sequence, reason} => {
+            }
+            Packet::ConnectChallengeReject { sequence, reason } => {
                 out.write_u8(PacketTypes::ConnectChallengeReject as u8);
                 out.write_u32(sequence);
                 out.write_string(reason);
-            },
-            Packet::ConnectChallengeResponse { sequence, address_digest } => {
+            }
+            Packet::ConnectChallengeResponse {
+                sequence,
+                address_digest,
+            } => {
                 out.write_u8(PacketTypes::ConnectChallengeResponse as u8);
                 out.write_u32(sequence);
                 out.write_u32(address_digest[0]);
                 out.write_u32(address_digest[1]);
                 out.write_u32(address_digest[2]);
                 out.write_u32(address_digest[3]);
-            },
-            Packet::ConnectRequest { sequence, address_digest, class_name, net_class_group, class_crc, game_string, current_protocol_version, min_required_protocol_version, join_password, connect_argv } => {
+            }
+            Packet::ConnectRequest {
+                sequence,
+                address_digest,
+                class_name,
+                net_class_group,
+                class_crc,
+                game_string,
+                current_protocol_version,
+                min_required_protocol_version,
+                join_password,
+                connect_argv,
+            } => {
                 out.write_u8(PacketTypes::ConnectRequest as u8);
                 out.write_u32(sequence);
                 out.write_u32(address_digest[0]);
@@ -700,25 +762,28 @@ impl Packet {
                 for arg in connect_argv {
                     out.write_string(arg);
                 }
-            },
+            }
             Packet::ConnectReject { sequence, reason } => {
                 out.write_u8(PacketTypes::ConnectReject as u8);
                 out.write_u32(sequence);
                 out.write_string(reason);
-            },
-            Packet::ConnectAccept { sequence, protocol_version } => {
+            }
+            Packet::ConnectAccept {
+                sequence,
+                protocol_version,
+            } => {
                 out.write_u8(PacketTypes::ConnectAccept as u8);
                 out.write_u32(sequence);
 
                 // NetConnection::readConnectAccept
                 // GameConnection::readConnectAccept
                 out.write_u32(protocol_version);
-            },
+            }
             Packet::Disconnect { sequence, reason } => {
                 out.write_u8(PacketTypes::Disconnect as u8);
                 out.write_u32(sequence);
                 out.write_string(reason);
-            },
+            }
         }
 
         out.into_bytes()

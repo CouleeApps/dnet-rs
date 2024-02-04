@@ -1,5 +1,5 @@
-use anyhow::{Error, Result};
 use crate::bitstream::BitStream;
+use anyhow::{Error, Result};
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum NetPacketType {
@@ -94,12 +94,16 @@ impl DNet {
         for i in (self.last_seq_received + 1)..seq_num {
             println!("Not recv: {}", i);
         }
-        println!("Recv: {} {}", seq_num, match packet_type {
-            a if a == NetPacketType::DataPacket as u32 => "DataPacket",
-            a if a == NetPacketType::PingPacket as u32 => "PingPacket",
-            a if a == NetPacketType::AckPacket as u32 => "AckPacket",
-            _ => "??"
-        });
+        println!(
+            "Recv: {} {}",
+            seq_num,
+            match packet_type {
+                a if a == NetPacketType::DataPacket as u32 => "DataPacket",
+                a if a == NetPacketType::PingPacket as u32 => "PingPacket",
+                a if a == NetPacketType::AckPacket as u32 => "AckPacket",
+                _ => "??",
+            }
+        );
 
         self.ack_mask <<= seq_num - self.last_seq_received;
 
@@ -178,7 +182,8 @@ impl DNet {
         stream.write_int(self.ack_mask, (ack_byte_count * 8) as usize);
 
         if packet_type == NetPacketType::DataPacket {
-            self.last_seq_recvd_at_send[(self.last_send_seq & 0x1F) as usize] = self.last_seq_received;
+            self.last_seq_recvd_at_send[(self.last_send_seq & 0x1F) as usize] =
+                self.last_seq_received;
         }
     }
 }

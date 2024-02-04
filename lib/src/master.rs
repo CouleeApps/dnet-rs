@@ -1,9 +1,9 @@
-use crate::packet::Packet;
-use crate::dnet::DNet;
-use tokio::net::{UdpSocket, ToSocketAddrs};
-use std::time::Duration;
-use anyhow::{Result, Error};
 use crate::bitstream::BitStream;
+use crate::dnet::DNet;
+use crate::packet::Packet;
+use anyhow::{Error, Result};
+use std::time::Duration;
+use tokio::net::{ToSocketAddrs, UdpSocket};
 
 pub struct MasterServer {
     socket: UdpSocket,
@@ -12,7 +12,11 @@ pub struct MasterServer {
 }
 
 impl MasterServer {
-    pub async fn connect<B: ToSocketAddrs, C: ToSocketAddrs>(bind_address: B, connect_address: C, connect_sequence: u32) -> Result<Self> {
+    pub async fn connect<B: ToSocketAddrs, C: ToSocketAddrs>(
+        bind_address: B,
+        connect_address: C,
+        connect_sequence: u32,
+    ) -> Result<Self> {
         let socket = UdpSocket::bind(bind_address).await?;
         let std_socket = socket.into_std()?;
         std_socket.set_write_timeout(Some(Duration::from_secs(30)))?;
@@ -23,7 +27,7 @@ impl MasterServer {
         let mut connection = MasterServer {
             socket,
             connect_sequence,
-            dnet: DNet::new(connect_sequence)
+            dnet: DNet::new(connect_sequence),
         };
 
         Ok(connection)

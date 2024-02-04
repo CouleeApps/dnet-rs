@@ -1,6 +1,5 @@
-
 use crate::huffman::HuffmanProcessor;
-use std::f32::consts::{PI, FRAC_1_SQRT_2, SQRT_2};
+use std::f32::consts::{FRAC_1_SQRT_2, PI, SQRT_2};
 
 const POINT_EPSILON: f32 = 0.0001f32;
 
@@ -115,7 +114,6 @@ impl BitStream {
         //If this value is going to push us onto the next item we need to do
         // some extra fun math.
         if self.shift + bits >= 8 {
-
             //How many bits over 8 are we going to need?
             let extra = (self.shift + bits) % 8;
             //How many bits do we have left before 8?
@@ -157,7 +155,8 @@ impl BitStream {
             } else {
                 self.data[self.position] & (0xFF >> (8 - self.shift))
             };
-            self.data[self.position] = lower | ((value << self.shift) & (0xFF >> (8 - bits - self.shift)));
+            self.data[self.position] =
+                lower | ((value << self.shift) & (0xFF >> (8 - bits - self.shift)));
 
             //Just add to the shift
             self.shift += bits;
@@ -265,11 +264,16 @@ impl BitStream {
         (
             phi.sin() * theta.cos(),
             phi.cos() * theta.cos(),
-            theta.sin()
+            theta.sin(),
         )
     }
 
-    pub fn read_vector(&mut self, max_magnitude: f32, magnitude_bits: usize, normal_bits: usize) -> (f32, f32, f32) {
+    pub fn read_vector(
+        &mut self,
+        max_magnitude: f32,
+        magnitude_bits: usize,
+        normal_bits: usize,
+    ) -> (f32, f32, f32) {
         if !self.read_flag() {
             return (0.0, 0.0, 0.0);
         }
@@ -282,11 +286,7 @@ impl BitStream {
         }
 
         let normal = self.read_normal_vector(normal_bits);
-        (
-            normal.0 * mag,
-            normal.1 * mag,
-            normal.2 * mag
-        )
+        (normal.0 * mag, normal.1 * mag, normal.2 * mag)
     }
 
     pub fn read_quat(&mut self, bit_count: usize) -> (f32, f32, f32, f32) {
@@ -417,9 +417,16 @@ impl BitStream {
         return value;
     }
 
-    pub fn write_normal_vector(&mut self, value: (f32, f32, f32), bit_count: usize) -> (f32, f32, f32) {
+    pub fn write_normal_vector(
+        &mut self,
+        value: (f32, f32, f32),
+        bit_count: usize,
+    ) -> (f32, f32, f32) {
         let phi = value.0.atan2(value.1) / PI;
-        let theta = value.2.atan2((value.0 * value.0 + value.1 * value.1).sqrt()) / (PI / 2.0);
+        let theta = value
+            .2
+            .atan2((value.0 * value.0 + value.1 * value.1).sqrt())
+            / (PI / 2.0);
 
         self.write_signed_float_neg_one_to_one(phi, bit_count + 1);
         self.write_signed_float_neg_one_to_one(theta, bit_count);
@@ -427,11 +434,17 @@ impl BitStream {
         (
             phi.sin() * theta.cos(),
             phi.cos() * theta.cos(),
-            theta.sin()
+            theta.sin(),
         )
     }
 
-    pub fn write_vector(&mut self, value: (f32, f32, f32), max_magnitude: f32, magnitude_bits: usize, normal_bits: usize) -> (f32, f32, f32) {
+    pub fn write_vector(
+        &mut self,
+        value: (f32, f32, f32),
+        max_magnitude: f32,
+        magnitude_bits: usize,
+        normal_bits: usize,
+    ) -> (f32, f32, f32) {
         let mag = (value.0 * value.0 + value.1 * value.1 + value.2 * value.2).sqrt();
         if mag < POINT_EPSILON {
             self.write_flag(false);
@@ -447,11 +460,7 @@ impl BitStream {
 
         let div = 1.0 / mag;
 
-        self.write_normal_vector((
-            value.0 * div,
-            value.1 * div,
-            value.2 * div,
-        ), normal_bits);
+        self.write_normal_vector((value.0 * div, value.1 * div, value.2 * div), normal_bits);
 
         return (
             (value.0 * div) * mag,
@@ -460,7 +469,11 @@ impl BitStream {
         );
     }
 
-    pub fn write_quat(&mut self, value: (f32, f32, f32, f32), bit_count: usize) -> (f32, f32, f32, f32) {
+    pub fn write_quat(
+        &mut self,
+        value: (f32, f32, f32, f32),
+        bit_count: usize,
+    ) -> (f32, f32, f32, f32) {
         let vals = [value.0, value.1, value.2, value.3];
         let mut flip = vals[0] < 0.0;
         let mut max_val = vals[0].abs();
@@ -480,11 +493,7 @@ impl BitStream {
             if i == idx_max {
                 continue;
             }
-            let cur_value = if flip {
-                -vals[i]
-            } else {
-                vals[i]
-            } * SQRT_2;
+            let cur_value = if flip { -vals[i] } else { vals[i] } * SQRT_2;
             self.write_signed_float_neg_one_to_one(cur_value, bit_count);
         }
 

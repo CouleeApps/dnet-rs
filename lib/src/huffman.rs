@@ -1,267 +1,21 @@
-use std::ptr::null_mut;
 use crate::bitstream::BitStream;
+use std::ptr::null_mut;
 
 // DANGER: Chock full of danger
 static mut g_huffProcessor: HuffmanProcessor = HuffmanProcessor::new();
 
 // This giant array of u32s is your last chance to not see the danger
 const csm_charFreqs: [u32; 256] = [
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-329   ,
-21    ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-2809  ,
-68    ,
-0     ,
-27    ,
-0     ,
-58    ,
-3     ,
-62    ,
-4     ,
-7     ,
-0     ,
-0     ,
-15    ,
-65    ,
-554   ,
-3     ,
-394   ,
-404   ,
-189   ,
-117   ,
-30    ,
-51    ,
-27    ,
-15    ,
-34    ,
-32    ,
-80    ,
-1     ,
-142   ,
-3     ,
-142   ,
-39    ,
-0     ,
-144   ,
-125   ,
-44    ,
-122   ,
-275   ,
-70    ,
-135   ,
-61    ,
-127   ,
-8     ,
-12    ,
-113   ,
-246   ,
-122   ,
-36    ,
-185   ,
-1     ,
-149   ,
-309   ,
-335   ,
-12    ,
-11    ,
-14    ,
-54    ,
-151   ,
-0     ,
-0     ,
-2     ,
-0     ,
-0     ,
-211   ,
-0     ,
-2090  ,
-344   ,
-736   ,
-993   ,
-2872  ,
-701   ,
-605   ,
-646   ,
-1552  ,
-328   ,
-305   ,
-1240  ,
-735   ,
-1533  ,
-1713  ,
-562   ,
-3     ,
-1775  ,
-1149  ,
-1469  ,
-979   ,
-407   ,
-553   ,
-59    ,
-279   ,
-31    ,
-0     ,
-0     ,
-0     ,
-68    ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0     ,
-0
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 329, 21, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 2809, 68, 0, 27, 0, 58, 3, 62, 4, 7, 0, 0, 15, 65, 554, 3, 394, 404, 189, 117, 30, 51, 27,
+    15, 34, 32, 80, 1, 142, 3, 142, 39, 0, 144, 125, 44, 122, 275, 70, 135, 61, 127, 8, 12, 113,
+    246, 122, 36, 185, 1, 149, 309, 335, 12, 11, 14, 54, 151, 0, 0, 2, 0, 0, 211, 0, 2090, 344,
+    736, 993, 2872, 701, 605, 646, 1552, 328, 305, 1240, 735, 1533, 1713, 562, 3, 1775, 1149, 1469,
+    979, 407, 553, 59, 279, 31, 0, 0, 0, 68, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];
 
 // Ok, I warned you
@@ -285,7 +39,7 @@ struct HuffLeaf {
 struct HuffWrap {
     // This should be red flag #2
     pNode: *mut HuffNode,
-    pLeaf: *mut HuffLeaf
+    pLeaf: *mut HuffLeaf,
 }
 
 #[derive(Clone, Debug)]
@@ -345,13 +99,13 @@ impl HuffmanProcessor {
             pop: 0,
             numBits: 0,
             symbol: 0,
-            code: 0
+            code: 0,
         });
         self.m_huffNodes.reserve(256);
         self.m_huffNodes.push(HuffNode {
             pop: 0,
             index0: 0,
-            index1: 0
+            index1: 0,
         });
 
         for i in 0..256 {
@@ -362,7 +116,10 @@ impl HuffmanProcessor {
         }
 
         let mut currWraps = 256;
-        let mut pWrap = (0..256).into_iter().map(|_| HuffWrap::new()).collect::<Vec<_>>();
+        let mut pWrap = (0..256)
+            .into_iter()
+            .map(|_| HuffWrap::new())
+            .collect::<Vec<_>>();
         for i in 0..256 {
             pWrap[i].set_leaf(&mut self.m_huffLeaves[i]);
         }
@@ -499,7 +256,12 @@ impl HuffmanProcessor {
         }
     }
 
-    fn writeHuffBuffer(&mut self, stream: &mut BitStream, buffer: Option<&[u8]>, maxLen: u32) -> u32 {
+    fn writeHuffBuffer(
+        &mut self,
+        stream: &mut BitStream,
+        buffer: Option<&[u8]>,
+        maxLen: u32,
+    ) -> u32 {
         if buffer.is_none() {
             stream.write_flag(false);
             stream.write_int(0, 8);
@@ -534,7 +296,10 @@ impl HuffmanProcessor {
             stream.write_int(len as u32, 8);
             for i in 0..len {
                 // Avert your eyes
-                stream.write_int(self.m_huffLeaves[buffer[i as usize] as usize].code, self.m_huffLeaves[buffer[i as usize] as usize].numBits as usize);
+                stream.write_int(
+                    self.m_huffLeaves[buffer[i as usize] as usize].code,
+                    self.m_huffLeaves[buffer[i as usize] as usize].numBits as usize,
+                );
             }
         }
 
@@ -561,6 +326,17 @@ impl HuffmanProcessor {
     }
 
     pub fn write_string(stream: &mut BitStream, value: &String) -> usize {
-        Self::write_buffer(stream, Some(value.chars().into_iter().map(|c| c as u8).collect::<Vec<u8>>().as_slice()), 256)
+        Self::write_buffer(
+            stream,
+            Some(
+                value
+                    .chars()
+                    .into_iter()
+                    .map(|c| c as u8)
+                    .collect::<Vec<u8>>()
+                    .as_slice(),
+            ),
+            256,
+        )
     }
 }
