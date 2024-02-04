@@ -1,4 +1,4 @@
-use crate::bitstream::BitStream;
+use crate::packet::BitStream;
 use anyhow::{Error, Result};
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]

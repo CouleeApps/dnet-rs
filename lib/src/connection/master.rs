@@ -1,6 +1,6 @@
-use crate::bitstream::BitStream;
-use crate::dnet::DNet;
+use super::dnet::DNet;
 use crate::packet::Packet;
+use crate::BitStream;
 use anyhow::{Error, Result};
 use std::time::Duration;
 use tokio::net::{ToSocketAddrs, UdpSocket};

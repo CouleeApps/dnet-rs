@@ -1,4 +1,8 @@
-use crate::bitstream::BitStream;
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+
+use super::bitstream::BitStream;
 use std::ptr::null_mut;
 
 // DANGER: Chock full of danger

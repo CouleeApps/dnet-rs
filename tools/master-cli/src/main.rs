@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use dnet::connection::GameConnection;
-use dnet::master::MasterServer;
-use dnet::packet::Packet;
+use dnet::MasterServer;
+use dnet::Packet;
 use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::time::{sleep, Duration};

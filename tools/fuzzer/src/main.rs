@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
-use dnet::connection::GameConnection;
-use dnet::packet::NetClassGroups::NetClassGroupGame;
 use dnet::packet::Packet;
+use dnet::GameConnection;
+use dnet::NetClassGroups::NetClassGroupGame;
 use tokio::net::UdpSocket;
 use tokio::select;
 use tokio::time::{sleep, Duration};

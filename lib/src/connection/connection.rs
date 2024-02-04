@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
-use crate::bitstream::BitStream;
-use crate::dnet::{DNet, DNetResult, NetPacketType};
+use super::dnet::{DNet, DNetResult, NetPacketType};
 use crate::packet::Packet;
+use crate::BitStream;
 use anyhow::{Error, Result};
 use rand::Rng;
 use std::time::Duration;

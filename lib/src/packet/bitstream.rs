@@ -1,4 +1,4 @@
-use crate::huffman::HuffmanProcessor;
+use super::huffman::HuffmanProcessor;
 use std::f32::consts::{FRAC_1_SQRT_2, PI, SQRT_2};
 
 const POINT_EPSILON: f32 = 0.0001f32;
