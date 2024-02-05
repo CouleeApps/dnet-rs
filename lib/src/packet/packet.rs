@@ -67,9 +67,9 @@ pub mod FilterFlags {
     pub const CurrentVersion: u8 = 128;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Packet {
-    Raw(BitStream),
+    Raw(Vec<u8>),
     MasterServerGameTypesRequest {
         flags: u8,
         key: u16,
@@ -77,7 +77,8 @@ pub enum Packet {
     },
     MasterServerGameTypesResponse {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
         game_types: Vec<String>,
         mission_types: Vec<String>,
     },
@@ -99,18 +100,21 @@ pub enum Packet {
     },
     MasterServerListResponse {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
         packet_index: u8,
         packet_total: u8,
         servers: Vec<(Ipv4Addr, u16)>,
     },
     GameMasterInfoRequest {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
     },
     GameMasterInfoResponse {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
         game_type: String,
         mission_type: String,
         max_players: u8,
@@ -124,11 +128,13 @@ pub enum Packet {
     },
     GamePingRequest {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
     },
     GamePingResponse {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
         version_string: String,
         current_protocol_version: u32,
         min_required_protocol_version: u32,
@@ -137,11 +143,13 @@ pub enum Packet {
     },
     GameInfoRequest {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
     },
     GameInfoResponse {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
         game_type: String,
         mission_type: String,
         mission_name: String,
@@ -228,7 +236,8 @@ pub enum Packet {
         address: (Ipv4Addr, u16),
         cmd: u8,
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
     },
     MasterServerGameInfoRequest {
         address: (Ipv4Addr, u16),
@@ -240,7 +249,8 @@ pub enum Packet {
         address: (Ipv4Addr, u16),
         cmd: u8,
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
     },
     MasterServerRelayRequest {
         address: (Ipv4Addr, u16),
@@ -255,7 +265,8 @@ pub enum Packet {
     },
     MasterServerJoinInviteResponse {
         flags: u8,
-        key: u32,
+        key: u16,
+        session: u16,
         found: u8,
         address: (Ipv4Addr, u16),
     },
@@ -284,15 +295,15 @@ impl Packet {
 
         if packet_type & 0x1 == 1 {
             // Raw packet
-            return Some(Self::Raw(BitStream::from_buffer(Vec::<u8>::from(bytes))));
+            return Some(Self::Raw(Vec::<u8>::from(bytes)));
         }
 
         match packet_type {
             PacketTypes::MasterServerGameTypesRequest => {
                 let flags = stream.read_u8();
                 let key_session = stream.read_u32();
-                let key = (key_session >> 16) as u16;
-                let session = (key_session & 0xffff) as u16;
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
 
                 Some(Self::MasterServerGameTypesRequest {
                     flags,
@@ -302,7 +313,9 @@ impl Packet {
             }
             PacketTypes::MasterServerGameTypesResponse => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
 
                 let game_type_count = stream.read_u8() as usize;
                 let mut game_types = vec![];
@@ -319,6 +332,7 @@ impl Packet {
                 Some(Self::MasterServerGameTypesResponse {
                     flags,
                     key,
+                    session,
                     game_types,
                     mission_types,
                 })
@@ -326,8 +340,8 @@ impl Packet {
             PacketTypes::MasterServerListRequest => {
                 let flags = stream.read_u8();
                 let key_session = stream.read_u32();
-                let key = (key_session >> 16) as u16;
-                let session = (key_session & 0xffff) as u16;
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 let packet_index = stream.read_u8();
                 let game_type = stream.read_cstring();
                 let mission_type = stream.read_cstring();
@@ -364,7 +378,9 @@ impl Packet {
             }
             PacketTypes::MasterServerListResponse => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 let packet_index = stream.read_u8();
                 let packet_total = stream.read_u8();
 
@@ -385,6 +401,7 @@ impl Packet {
                 Some(Self::MasterServerListResponse {
                     flags,
                     key,
+                    session,
                     packet_index,
                     packet_total,
                     servers,
@@ -392,13 +409,21 @@ impl Packet {
             }
             PacketTypes::GameMasterInfoRequest => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
 
-                Some(Self::GameMasterInfoRequest { flags, key })
+                Some(Self::GameMasterInfoRequest {
+                    flags,
+                    key,
+                    session,
+                })
             }
             PacketTypes::GameMasterInfoResponse => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 let game_type = stream.read_cstring();
                 let mission_type = stream.read_cstring();
                 let max_players = stream.read_u8();
@@ -417,6 +442,7 @@ impl Packet {
                 Some(Self::GameMasterInfoResponse {
                     flags,
                     key,
+                    session,
                     game_type,
                     mission_type,
                     max_players,
@@ -431,13 +457,21 @@ impl Packet {
             }
             PacketTypes::GamePingRequest => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
 
-                Some(Self::GamePingRequest { flags, key })
+                Some(Self::GamePingRequest {
+                    flags,
+                    key,
+                    session,
+                })
             }
             PacketTypes::GamePingResponse => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 let version_string = stream.read_string();
                 let current_protocol_version = stream.read_u32();
                 let min_required_protocol_version = stream.read_u32();
@@ -447,6 +481,7 @@ impl Packet {
                 Some(Self::GamePingResponse {
                     flags,
                     key,
+                    session,
                     version_string,
                     current_protocol_version,
                     min_required_protocol_version,
@@ -456,13 +491,21 @@ impl Packet {
             }
             PacketTypes::GameInfoRequest => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
 
-                Some(Self::GameInfoRequest { flags, key })
+                Some(Self::GameInfoRequest {
+                    flags,
+                    key,
+                    session,
+                })
             }
             PacketTypes::GameInfoResponse => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 let game_type = Self::read_maybe_compressed_string(&mut stream, flags);
                 let mission_type = Self::read_maybe_compressed_string(&mut stream, flags);
                 let mission_name = Self::read_maybe_compressed_string(&mut stream, flags);
@@ -477,6 +520,7 @@ impl Packet {
                 Some(Self::GameInfoResponse {
                     flags,
                     key,
+                    session,
                     game_type,
                     mission_type,
                     mission_name,
@@ -492,8 +536,8 @@ impl Packet {
             PacketTypes::GameHeartbeat => {
                 let flags = stream.read_u8();
                 let key_session = stream.read_u32();
-                let key = (key_session >> 16) as u16;
-                let session = (key_session & 0xffff) as u16;
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 Some(Self::GameHeartbeat {
                     flags,
                     key,
@@ -673,8 +717,8 @@ impl Packet {
                 );
                 let flags = stream.read_u8();
                 let key_session = stream.read_u32();
-                let key = (key_session >> 16) as u16;
-                let session = (key_session & 0xffff) as u16;
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 Some(Self::MasterServerGamePingRequest {
                     address,
                     flags,
@@ -694,12 +738,15 @@ impl Packet {
                 );
                 let cmd = stream.read_u8();
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 Some(Self::MasterServerGamePingResponse {
                     address,
                     cmd,
                     flags,
                     key,
+                    session,
                 })
             }
             PacketTypes::MasterServerGameInfoRequest => {
@@ -714,8 +761,8 @@ impl Packet {
                 );
                 let flags = stream.read_u8();
                 let key_session = stream.read_u32();
-                let key = (key_session >> 16) as u16;
-                let session = (key_session & 0xffff) as u16;
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 Some(Self::MasterServerGameInfoRequest {
                     address,
                     flags,
@@ -735,12 +782,15 @@ impl Packet {
                 );
                 let cmd = stream.read_u8();
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 Some(Self::MasterServerGameInfoResponse {
                     address,
                     cmd,
                     flags,
                     key,
+                    session,
                 })
             }
             PacketTypes::MasterServerRelayRequest => {
@@ -775,7 +825,9 @@ impl Packet {
             }
             PacketTypes::MasterServerJoinInviteResponse => {
                 let flags = stream.read_u8();
-                let key = stream.read_u32();
+                let key_session = stream.read_u32();
+                let key = (key_session & 0xffff) as u16;
+                let session = (key_session >> 16) as u16;
                 let found = stream.read_u8();
                 let address = (
                     Ipv4Addr::new(
@@ -789,6 +841,7 @@ impl Packet {
                 Some(Self::MasterServerJoinInviteResponse {
                     flags,
                     key,
+                    session,
                     found,
                     address,
                 })
@@ -803,7 +856,7 @@ impl Packet {
         let mut out = BitStream::new();
         match self {
             Packet::Raw(raw_packet) => {
-                return raw_packet.into_bytes();
+                return raw_packet;
             }
             Packet::MasterServerGameTypesRequest {
                 flags,
@@ -817,12 +870,13 @@ impl Packet {
             Packet::MasterServerGameTypesResponse {
                 flags,
                 key,
+                session,
                 game_types,
                 mission_types,
             } => {
                 out.write_u8(PacketTypes::MasterServerGameTypesResponse);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
 
                 out.write_u32(game_types.len() as u32);
                 for game_type in game_types {
@@ -874,13 +928,14 @@ impl Packet {
             Packet::MasterServerListResponse {
                 flags,
                 key,
+                session,
                 packet_index,
                 packet_total,
                 servers,
             } => {
                 out.write_u8(PacketTypes::MasterServerListResponse);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
                 out.write_u8(packet_index);
                 out.write_u8(packet_total);
 
@@ -893,14 +948,19 @@ impl Packet {
                     out.write_u16(server.1);
                 }
             }
-            Packet::GameMasterInfoRequest { flags, key } => {
+            Packet::GameMasterInfoRequest {
+                flags,
+                key,
+                session,
+            } => {
                 out.write_u8(PacketTypes::GameMasterInfoRequest);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
             }
             Packet::GameMasterInfoResponse {
                 flags,
                 key,
+                session,
                 game_type,
                 mission_type,
                 max_players,
@@ -914,7 +974,7 @@ impl Packet {
             } => {
                 out.write_u8(PacketTypes::GameMasterInfoResponse);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
                 out.write_cstring(game_type);
                 out.write_cstring(mission_type);
                 out.write_u8(max_players);
@@ -932,14 +992,19 @@ impl Packet {
                     out.write_u32(0);
                 }
             }
-            Packet::GamePingRequest { flags, key } => {
+            Packet::GamePingRequest {
+                flags,
+                key,
+                session,
+            } => {
                 out.write_u8(PacketTypes::GamePingRequest);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
             }
             Packet::GamePingResponse {
                 flags,
                 key,
+                session,
                 version_string,
                 current_protocol_version,
                 min_required_protocol_version,
@@ -948,21 +1013,26 @@ impl Packet {
             } => {
                 out.write_u8(PacketTypes::GamePingResponse);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
                 Self::write_maybe_compressed_string(&mut out, flags, version_string);
                 out.write_u32(current_protocol_version);
                 out.write_u32(min_required_protocol_version);
                 out.write_u32(version);
                 Self::write_maybe_compressed_string(&mut out, flags, name);
             }
-            Packet::GameInfoRequest { flags, key } => {
+            Packet::GameInfoRequest {
+                flags,
+                key,
+                session,
+            } => {
                 out.write_u8(PacketTypes::GameInfoRequest);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
             }
             Packet::GameInfoResponse {
                 flags,
                 key,
+                session,
                 game_type,
                 mission_type,
                 mission_name,
@@ -976,7 +1046,7 @@ impl Packet {
             } => {
                 out.write_u8(PacketTypes::GameInfoResponse);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
                 Self::write_maybe_compressed_string(&mut out, flags, game_type);
                 Self::write_maybe_compressed_string(&mut out, flags, mission_type);
                 Self::write_maybe_compressed_string(&mut out, flags, mission_name);
@@ -1156,6 +1226,7 @@ impl Packet {
                 cmd,
                 flags,
                 key,
+                session,
             } => {
                 out.write_u8(PacketTypes::MasterServerGamePingResponse);
                 out.write_u8(address.octets()[0]);
@@ -1165,7 +1236,7 @@ impl Packet {
                 out.write_u16(port);
                 out.write_u8(cmd);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
             }
             Packet::MasterServerGameInfoRequest {
                 address: (address, port),
@@ -1187,6 +1258,7 @@ impl Packet {
                 cmd,
                 flags,
                 key,
+                session,
             } => {
                 out.write_u8(PacketTypes::MasterServerGameInfoResponse);
                 out.write_u8(address.octets()[0]);
@@ -1196,7 +1268,7 @@ impl Packet {
                 out.write_u16(port);
                 out.write_u8(cmd);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
             }
             Packet::MasterServerRelayRequest {
                 address: (address, port),
@@ -1230,12 +1302,13 @@ impl Packet {
             Packet::MasterServerJoinInviteResponse {
                 flags,
                 key,
+                session,
                 found,
                 address: (address, port),
             } => {
                 out.write_u8(PacketTypes::MasterServerJoinInviteResponse);
                 out.write_u8(flags);
-                out.write_u32(key);
+                out.write_u32((session as u32) << 16 | key as u32);
                 out.write_u8(found);
                 out.write_u8(address.octets()[0]);
                 out.write_u8(address.octets()[1]);
