@@ -2,6 +2,7 @@
 #![allow(non_upper_case_globals)]
 
 use super::bitstream::BitStream;
+use anyhow::Result;
 use std::net::Ipv4Addr;
 
 pub mod PacketTypes {
@@ -41,9 +42,11 @@ pub mod PacketTypes {
     pub const MasterServerGameInfoResponse: u8 = 64;
     pub const MasterServerRelayRequest: u8 = 66;
     pub const MasterServerRelayResponse: u8 = 68;
+    pub const MasterServerRelayDelete: u8 = 70;
     pub const MasterServerRelayReady: u8 = 72;
     pub const MasterServerJoinInvite: u8 = 74;
     pub const MasterServerJoinInviteResponse: u8 = 76;
+    pub const MasterServerRelayHeartbeat: u8 = 78;
 }
 
 pub mod NetClassGroups {
@@ -65,6 +68,13 @@ pub mod FilterFlags {
     pub const NotPasworded: u8 = 1;
     pub const Linux: u8 = 2;
     pub const CurrentVersion: u8 = 128;
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum PacketSource {
+    GameToGame,
+    GameToMaster,
+    MasterToRelay,
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +221,9 @@ pub enum Packet {
         address: (Ipv4Addr, u16),
     },
     MasterServerClientRequestedArrangedConnection {
+        flags: u8,
+        key: u16,
+        session: u16,
         client_id: u16,
         possible_addresses: Vec<(Ipv4Addr, u16)>,
     },
@@ -218,13 +231,19 @@ pub enum Packet {
         client_id: u16,
     },
     MasterServerArrangedConnectionAccepted {
+        flags: u8,
+        key: u16,
+        session: u16,
         possible_addresses: Vec<(Ipv4Addr, u16)>,
     },
     MasterServerRejectArrangedConnection {
-        reason: u8, // todo: not implemented in engine
+        client_id: u16,
     },
     MasterServerArrangedConnectionRejected {
-        reason: u8, // todo: not implemented in engine
+        flags: u8,
+        key: u16,
+        session: u16,
+        reason: u8,
     },
     MasterServerGamePingRequest {
         address: (Ipv4Addr, u16),
@@ -233,11 +252,11 @@ pub enum Packet {
         session: u16,
     },
     MasterServerGamePingResponse {
-        address: (Ipv4Addr, u16),
-        cmd: u8,
         flags: u8,
         key: u16,
         session: u16,
+        address: (Ipv4Addr, u16),
+        buffer: Vec<u8>,
     },
     MasterServerGameInfoRequest {
         address: (Ipv4Addr, u16),
@@ -246,20 +265,37 @@ pub enum Packet {
         session: u16,
     },
     MasterServerGameInfoResponse {
+        flags: u8,
+        key: u16,
+        session: u16,
         address: (Ipv4Addr, u16),
-        cmd: u8,
+        buffer: Vec<u8>,
+    },
+    MasterServerRelayRequestToMaster {
+        address: (Ipv4Addr, u16),
+    },
+    MasterServerRelayRequestToRelay {
+        relay_id: u32,
+        server_addr: (Ipv4Addr, u16),
+        client_addr: Ipv4Addr,
+    },
+    MasterServerRelayResponseFromRelay {
+        relay_id: u32,
+        relay_port: u16,
+    },
+    MasterServerRelayResponseFromMaster {
+        flags: u8,
+        key: u16,
+        session: u16,
+        is_host: bool,
+        address: (Ipv4Addr, u16),
+    },
+    MasterServerRelayDelete {},
+    MasterServerRelayReady {
         flags: u8,
         key: u16,
         session: u16,
     },
-    MasterServerRelayRequest {
-        address: (Ipv4Addr, u16),
-    },
-    MasterServerRelayResponse {
-        is_host: bool,
-        address: (Ipv4Addr, u16),
-    },
-    MasterServerRelayReady {},
     MasterServerJoinInvite {
         invite_code: String,
     },
@@ -267,13 +303,13 @@ pub enum Packet {
         flags: u8,
         key: u16,
         session: u16,
-        found: u8,
-        address: (Ipv4Addr, u16),
+        address: Option<(Ipv4Addr, u16)>,
     },
+    MasterServerRelayHeartbeat {},
 }
 
 impl Packet {
-    fn read_maybe_compressed_string(packet: &mut BitStream, flags: u8) -> String {
+    fn read_maybe_compressed_string(packet: &mut BitStream, flags: u8) -> Result<String> {
         if (flags & QueryFlags::NoStringCompress) == QueryFlags::NoStringCompress {
             packet.read_cstring()
         } else {
@@ -281,7 +317,74 @@ impl Packet {
         }
     }
 
-    fn write_maybe_compressed_string(packet: &mut BitStream, flags: u8, string: String) {
+    fn read_flags_key_session(stream: &mut BitStream) -> Result<(u8, u16, u16)> {
+        let flags = stream.read_u8()?;
+        let key_session = stream.read_u32()?;
+        let key = (key_session & 0xffff) as u16;
+        let session = (key_session >> 16) as u16;
+
+        Ok((flags, key, session))
+    }
+
+    fn read_address(stream: &mut BitStream) -> Result<Ipv4Addr> {
+        Ok(Ipv4Addr::new(
+            stream.read_u8()?,
+            stream.read_u8()?,
+            stream.read_u8()?,
+            stream.read_u8()?,
+        ))
+    }
+
+    fn read_address_and_port(stream: &mut BitStream) -> Result<(Ipv4Addr, u16)> {
+        Ok((
+            Ipv4Addr::new(
+                stream.read_u8()?,
+                stream.read_u8()?,
+                stream.read_u8()?,
+                stream.read_u8()?,
+            ),
+            stream.read_u16()?,
+        ))
+    }
+
+    fn read_list<F, R>(stream: &mut BitStream, count: usize, f: F) -> Result<Vec<R>>
+    where
+        F: Fn(&mut BitStream) -> Result<R>,
+    {
+        let mut result = vec![];
+
+        for _ in 0..count {
+            result.push(f(stream)?);
+        }
+
+        Ok(result)
+    }
+
+    fn read_u8_list<F, R>(stream: &mut BitStream, f: F) -> Result<Vec<R>>
+    where
+        F: Fn(&mut BitStream) -> Result<R>,
+    {
+        let length = stream.read_u8()?;
+        Self::read_list(stream, length as usize, f)
+    }
+
+    fn read_u16_list<F, R>(stream: &mut BitStream, f: F) -> Result<Vec<R>>
+    where
+        F: Fn(&mut BitStream) -> Result<R>,
+    {
+        let length = stream.read_u16()?;
+        Self::read_list(stream, length as usize, f)
+    }
+
+    fn read_u32_list<F, R>(stream: &mut BitStream, f: F) -> Result<Vec<R>>
+    where
+        F: Fn(&mut BitStream) -> Result<R>,
+    {
+        let length = stream.read_u32()?;
+        Self::read_list(stream, length as usize, f)
+    }
+
+    fn write_maybe_compressed_string(packet: &mut BitStream, flags: u8, string: &String) {
         if (flags & QueryFlags::NoStringCompress) == QueryFlags::NoStringCompress {
             packet.write_cstring(string);
         } else {
@@ -289,21 +392,46 @@ impl Packet {
         }
     }
 
-    pub fn try_from_bytes(bytes: &[u8]) -> Option<Self> {
+    fn write_flags_key_session(packet: &mut BitStream, flags: u8, key: u16, session: u16) {
+        packet.write_u8(flags);
+        packet.write_u32((session as u32) << 16 | key as u32);
+    }
+
+    fn write_address(packet: &mut BitStream, address: Ipv4Addr) {
+        packet.write_u8(address.octets()[0]);
+        packet.write_u8(address.octets()[1]);
+        packet.write_u8(address.octets()[2]);
+        packet.write_u8(address.octets()[3]);
+    }
+
+    fn write_address_and_port(packet: &mut BitStream, address: (Ipv4Addr, u16)) {
+        packet.write_u8(address.0.octets()[0]);
+        packet.write_u8(address.0.octets()[1]);
+        packet.write_u8(address.0.octets()[2]);
+        packet.write_u8(address.0.octets()[3]);
+        packet.write_u16(address.1);
+    }
+
+    pub fn try_from_bytes(bytes: &[u8], source: PacketSource) -> Option<Self> {
         let mut stream = BitStream::from_buffer(Vec::<u8>::from(bytes));
-        let packet_type = stream.read_u8();
+
+        match Self::try_from_stream(&mut stream, source) {
+            Ok(result) => result,
+            Err(_) => None,
+        }
+    }
+
+    pub fn try_from_stream(stream: &mut BitStream, source: PacketSource) -> Result<Option<Self>> {
+        let packet_type = stream.read_u8()?;
 
         if packet_type & 0x1 == 1 {
             // Raw packet
-            return Some(Self::Raw(Vec::<u8>::from(bytes)));
+            return Ok(Some(Self::Raw(Vec::<u8>::from(stream.as_bytes()))));
         }
 
-        match packet_type {
+        Ok(match packet_type {
             PacketTypes::MasterServerGameTypesRequest => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
 
                 Some(Self::MasterServerGameTypesRequest {
                     flags,
@@ -312,22 +440,10 @@ impl Packet {
                 })
             }
             PacketTypes::MasterServerGameTypesResponse => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
 
-                let game_type_count = stream.read_u8() as usize;
-                let mut game_types = vec![];
-                for _ in 0..game_type_count {
-                    game_types.push(stream.read_cstring());
-                }
-
-                let mission_type_count = stream.read_u8() as usize;
-                let mut mission_types = vec![];
-                for _ in 0..mission_type_count {
-                    mission_types.push(stream.read_cstring());
-                }
+                let game_types = Self::read_u8_list(stream, |stream| stream.read_cstring())?;
+                let mission_types = Self::read_u8_list(stream, |stream| stream.read_cstring())?;
 
                 Some(Self::MasterServerGameTypesResponse {
                     flags,
@@ -338,26 +454,19 @@ impl Packet {
                 })
             }
             PacketTypes::MasterServerListRequest => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
-                let packet_index = stream.read_u8();
-                let game_type = stream.read_cstring();
-                let mission_type = stream.read_cstring();
-                let min_players = stream.read_u8();
-                let max_players = stream.read_u8();
-                let region_mask = stream.read_u32();
-                let version = stream.read_u32();
-                let filter_flag = stream.read_u8();
-                let max_bots = stream.read_u8();
-                let min_cpu = stream.read_u16();
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let packet_index = stream.read_u8()?;
+                let game_type = stream.read_cstring()?;
+                let mission_type = stream.read_cstring()?;
+                let min_players = stream.read_u8()?;
+                let max_players = stream.read_u8()?;
+                let region_mask = stream.read_u32()?;
+                let version = stream.read_u32()?;
+                let filter_flag = stream.read_u8()?;
+                let max_bots = stream.read_u8()?;
+                let min_cpu = stream.read_u16()?;
 
-                let buddy_count = stream.read_u8();
-                let mut buddy_list = vec![];
-                for _ in 0..buddy_count {
-                    buddy_list.push(stream.read_u32());
-                }
+                let buddy_list = Self::read_u8_list(stream, |stream| stream.read_u32())?;
 
                 Some(Self::MasterServerListRequest {
                     flags,
@@ -377,26 +486,11 @@ impl Packet {
                 })
             }
             PacketTypes::MasterServerListResponse => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
-                let packet_index = stream.read_u8();
-                let packet_total = stream.read_u8();
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let packet_index = stream.read_u8()?;
+                let packet_total = stream.read_u8()?;
 
-                let server_count = stream.read_u16() as usize;
-                let mut servers = vec![];
-                for _ in 0..server_count {
-                    servers.push((
-                        Ipv4Addr::new(
-                            stream.read_u8(),
-                            stream.read_u8(),
-                            stream.read_u8(),
-                            stream.read_u8(),
-                        ),
-                        stream.read_u16(),
-                    ));
-                }
+                let servers = Self::read_u16_list(stream, Self::read_address_and_port)?;
 
                 Some(Self::MasterServerListResponse {
                     flags,
@@ -408,10 +502,7 @@ impl Packet {
                 })
             }
             PacketTypes::GameMasterInfoRequest => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
 
                 Some(Self::GameMasterInfoRequest {
                     flags,
@@ -420,24 +511,21 @@ impl Packet {
                 })
             }
             PacketTypes::GameMasterInfoResponse => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
-                let game_type = stream.read_cstring();
-                let mission_type = stream.read_cstring();
-                let max_players = stream.read_u8();
-                let region_mask = stream.read_u32();
-                let version = stream.read_u32();
-                let filter_flag = stream.read_u8();
-                let bot_count = stream.read_u8();
-                let cpu_speed = stream.read_u32();
-                let player_count = stream.read_u8();
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let game_type = stream.read_cstring()?;
+                let mission_type = stream.read_cstring()?;
+                let max_players = stream.read_u8()?;
+                let region_mask = stream.read_u32()?;
+                let version = stream.read_u32()?;
+                let filter_flag = stream.read_u8()?;
+                let bot_count = stream.read_u8()?;
+                let cpu_speed = stream.read_u32()?;
+                let player_count = stream.read_u8()?;
 
-                let mut guid_list = vec![];
-                for _ in 0..player_count {
-                    guid_list.push(stream.read_u32());
-                }
+                let guid_list = Self::read_list(stream, player_count as usize, |stream| {
+                    // Sometimes this isn't sent
+                    Ok(stream.read_u32().unwrap_or(0))
+                })?;
 
                 Some(Self::GameMasterInfoResponse {
                     flags,
@@ -456,10 +544,7 @@ impl Packet {
                 })
             }
             PacketTypes::GamePingRequest => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
 
                 Some(Self::GamePingRequest {
                     flags,
@@ -468,15 +553,12 @@ impl Packet {
                 })
             }
             PacketTypes::GamePingResponse => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
-                let version_string = stream.read_string();
-                let current_protocol_version = stream.read_u32();
-                let min_required_protocol_version = stream.read_u32();
-                let version = stream.read_u32();
-                let name = stream.read_string();
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let version_string = stream.read_string()?;
+                let current_protocol_version = stream.read_u32()?;
+                let min_required_protocol_version = stream.read_u32()?;
+                let version = stream.read_u32()?;
+                let name = stream.read_string()?;
 
                 Some(Self::GamePingResponse {
                     flags,
@@ -490,10 +572,7 @@ impl Packet {
                 })
             }
             PacketTypes::GameInfoRequest => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
 
                 Some(Self::GameInfoRequest {
                     flags,
@@ -502,20 +581,17 @@ impl Packet {
                 })
             }
             PacketTypes::GameInfoResponse => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
-                let game_type = Self::read_maybe_compressed_string(&mut stream, flags);
-                let mission_type = Self::read_maybe_compressed_string(&mut stream, flags);
-                let mission_name = Self::read_maybe_compressed_string(&mut stream, flags);
-                let filter_flag = stream.read_u8();
-                let player_count = stream.read_u8();
-                let max_players = stream.read_u8();
-                let bot_count = stream.read_u8();
-                let cpu_speed = stream.read_u16();
-                let server_info = Self::read_maybe_compressed_string(&mut stream, flags);
-                let server_info_query = stream.read_long_cstring();
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let game_type = Self::read_maybe_compressed_string(stream, flags)?;
+                let mission_type = Self::read_maybe_compressed_string(stream, flags)?;
+                let mission_name = Self::read_maybe_compressed_string(stream, flags)?;
+                let filter_flag = stream.read_u8()?;
+                let player_count = stream.read_u8()?;
+                let max_players = stream.read_u8()?;
+                let bot_count = stream.read_u8()?;
+                let cpu_speed = stream.read_u16()?;
+                let server_info = Self::read_maybe_compressed_string(stream, flags)?;
+                let server_info_query = stream.read_long_cstring()?;
 
                 Some(Self::GameInfoResponse {
                     flags,
@@ -534,10 +610,7 @@ impl Packet {
                 })
             }
             PacketTypes::GameHeartbeat => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
                 Some(Self::GameHeartbeat {
                     flags,
                     key,
@@ -548,22 +621,22 @@ impl Packet {
                 todo!()
             }
             PacketTypes::ConnectChallengeRequest => {
-                let sequence = stream.read_u32();
+                let sequence = stream.read_u32()?;
                 Some(Self::ConnectChallengeRequest { sequence })
             }
             PacketTypes::ConnectChallengeReject => {
-                let sequence = stream.read_u32();
-                let reason = stream.read_string();
+                let sequence = stream.read_u32()?;
+                let reason = stream.read_string()?;
 
                 Some(Self::ConnectChallengeReject { sequence, reason })
             }
             PacketTypes::ConnectChallengeResponse => {
-                let sequence = stream.read_u32();
+                let sequence = stream.read_u32()?;
                 let address_digest = [
-                    stream.read_u32(),
-                    stream.read_u32(),
-                    stream.read_u32(),
-                    stream.read_u32(),
+                    stream.read_u32()?,
+                    stream.read_u32()?,
+                    stream.read_u32()?,
+                    stream.read_u32()?,
                 ];
 
                 Some(Self::ConnectChallengeResponse {
@@ -572,30 +645,26 @@ impl Packet {
                 })
             }
             PacketTypes::ConnectRequest => {
-                let sequence = stream.read_u32();
+                let sequence = stream.read_u32()?;
                 let address_digest = [
-                    stream.read_u32(),
-                    stream.read_u32(),
-                    stream.read_u32(),
-                    stream.read_u32(),
+                    stream.read_u32()?,
+                    stream.read_u32()?,
+                    stream.read_u32()?,
+                    stream.read_u32()?,
                 ];
-                let class_name = stream.read_string();
+                let class_name = stream.read_string()?;
 
                 // NetConnection::writeConnectRequest
-                let net_class_group = stream.read_u32();
-                let class_crc = stream.read_u32();
+                let net_class_group = stream.read_u32()?;
+                let class_crc = stream.read_u32()?;
 
                 // GameConnection::writeConnectRequest
-                let game_string = stream.read_string();
-                let current_protocol_version = stream.read_u32();
-                let min_required_protocol_version = stream.read_u32();
-                let join_password = stream.read_string();
-                let num_connect_argv = stream.read_u32();
+                let game_string = stream.read_string()?;
+                let current_protocol_version = stream.read_u32()?;
+                let min_required_protocol_version = stream.read_u32()?;
+                let join_password = stream.read_string()?;
 
-                let mut connect_argv = vec![];
-                for _ in 0..num_connect_argv {
-                    connect_argv.push(stream.read_string());
-                }
+                let connect_argv = Self::read_u32_list(stream, |stream| stream.read_string())?;
 
                 Some(Self::ConnectRequest {
                     sequence,
@@ -611,28 +680,28 @@ impl Packet {
                 })
             }
             PacketTypes::ConnectReject => {
-                let sequence = stream.read_u32();
-                let reason = stream.read_string();
+                let sequence = stream.read_u32()?;
+                let reason = stream.read_string()?;
                 Some(Self::ConnectReject { sequence, reason })
             }
             PacketTypes::ConnectAccept => {
-                let sequence = stream.read_u32();
-                let protocol_version = stream.read_u32();
+                let sequence = stream.read_u32()?;
+                let protocol_version = stream.read_u32()?;
                 Some(Self::ConnectAccept {
                     sequence,
                     protocol_version,
                 })
             }
             PacketTypes::Disconnect => {
-                let sequence = stream.read_u32();
-                let reason = stream.read_string();
+                let sequence = stream.read_u32()?;
+                let reason = stream.read_string()?;
 
                 Some(Self::Disconnect { sequence, reason })
             }
             PacketTypes::Punch => Some(Self::Punch {}),
             PacketTypes::ArrangedConnectRequest => {
-                let sequence = stream.read_u32();
-                let debug_object_sizes = stream.read_flag();
+                let sequence = stream.read_u32()?;
+                let debug_object_sizes = stream.read_flag()?;
 
                 Some(Self::ArrangedConnectRequest {
                     sequence,
@@ -640,85 +709,59 @@ impl Packet {
                 })
             }
             PacketTypes::MasterServerRequestArrangedConnection => {
-                let address = Ipv4Addr::new(
-                    stream.read_u8(),
-                    stream.read_u8(),
-                    stream.read_u8(),
-                    stream.read_u8(),
-                );
-                let port = stream.read_u16();
+                let address = Self::read_address_and_port(stream)?;
 
-                Some(Self::MasterServerRequestArrangedConnection {
-                    address: (address, port),
-                })
+                Some(Self::MasterServerRequestArrangedConnection { address })
             }
             PacketTypes::MasterServerClientRequestedArrangedConnection => {
-                let client_id = stream.read_u16();
-                let mut possible_addresses = vec![];
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let client_id = stream.read_u16()?;
 
-                let possible_address_len = stream.read_u8();
-                for _ in 0..possible_address_len {
-                    possible_addresses.push((
-                        Ipv4Addr::new(
-                            stream.read_u8(),
-                            stream.read_u8(),
-                            stream.read_u8(),
-                            stream.read_u8(),
-                        ),
-                        stream.read_u16(),
-                    ));
-                }
+                let possible_addresses = Self::read_u8_list(stream, Self::read_address_and_port)?;
 
                 Some(Self::MasterServerClientRequestedArrangedConnection {
+                    flags,
+                    key,
+                    session,
                     client_id,
                     possible_addresses,
                 })
             }
             PacketTypes::MasterServerAcceptArrangedConnection => {
-                let client_id = stream.read_u16();
+                let client_id = stream.read_u16()?;
 
                 Some(Self::MasterServerAcceptArrangedConnection { client_id })
             }
             PacketTypes::MasterServerArrangedConnectionAccepted => {
-                let mut possible_addresses = vec![];
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
 
-                let possible_address_len = stream.read_u8();
-                for _ in 0..possible_address_len {
-                    possible_addresses.push((
-                        Ipv4Addr::new(
-                            stream.read_u8(),
-                            stream.read_u8(),
-                            stream.read_u8(),
-                            stream.read_u8(),
-                        ),
-                        stream.read_u16(),
-                    ));
-                }
+                let possible_addresses = Self::read_u8_list(stream, Self::read_address_and_port)?;
 
-                Some(Self::MasterServerArrangedConnectionAccepted { possible_addresses })
+                Some(Self::MasterServerArrangedConnectionAccepted {
+                    flags,
+                    key,
+                    session,
+                    possible_addresses,
+                })
             }
             PacketTypes::MasterServerRejectArrangedConnection => {
-                let reason = stream.read_u8();
-                Some(Self::MasterServerRejectArrangedConnection { reason })
+                let client_id = stream.read_u16()?;
+                Some(Self::MasterServerRejectArrangedConnection { client_id })
             }
             PacketTypes::MasterServerArrangedConnectionRejected => {
-                let reason = stream.read_u8();
-                Some(Self::MasterServerArrangedConnectionRejected { reason })
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let reason = stream.read_u8()?;
+                Some(Self::MasterServerArrangedConnectionRejected {
+                    flags,
+                    key,
+                    session,
+                    reason,
+                })
             }
             PacketTypes::MasterServerGamePingRequest => {
-                let address = (
-                    Ipv4Addr::new(
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                    ),
-                    stream.read_u16(),
-                );
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                // Why tho
+                let address = Self::read_address_and_port(stream)?;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
                 Some(Self::MasterServerGamePingRequest {
                     address,
                     flags,
@@ -727,42 +770,20 @@ impl Packet {
                 })
             }
             PacketTypes::MasterServerGamePingResponse => {
-                let address = (
-                    Ipv4Addr::new(
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                    ),
-                    stream.read_u16(),
-                );
-                let cmd = stream.read_u8();
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let address = Self::read_address_and_port(stream)?;
+                let buffer = Vec::from(&stream.as_bytes()[(stream.get_bit_pos() / 8)..]);
                 Some(Self::MasterServerGamePingResponse {
-                    address,
-                    cmd,
                     flags,
                     key,
                     session,
+                    address,
+                    buffer,
                 })
             }
             PacketTypes::MasterServerGameInfoRequest => {
-                let address = (
-                    Ipv4Addr::new(
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                    ),
-                    stream.read_u16(),
-                );
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let address = Self::read_address_and_port(stream)?;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
                 Some(Self::MasterServerGameInfoRequest {
                     address,
                     flags,
@@ -771,85 +792,95 @@ impl Packet {
                 })
             }
             PacketTypes::MasterServerGameInfoResponse => {
-                let address = (
-                    Ipv4Addr::new(
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                    ),
-                    stream.read_u16(),
-                );
-                let cmd = stream.read_u8();
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let address = Self::read_address_and_port(stream)?;
+                let buffer = Vec::from(&stream.as_bytes()[(stream.get_bit_pos() / 8)..]);
                 Some(Self::MasterServerGameInfoResponse {
+                    flags,
+                    key,
+                    session,
                     address,
-                    cmd,
+                    buffer,
+                })
+            }
+            PacketTypes::MasterServerRelayRequest => match source {
+                PacketSource::GameToGame => None,
+                PacketSource::GameToMaster => {
+                    let address = Self::read_address_and_port(stream)?;
+                    Some(Self::MasterServerRelayRequestToMaster { address })
+                }
+                PacketSource::MasterToRelay => {
+                    let relay_id = stream.read_u32()?;
+                    let server_addr = Self::read_address_and_port(stream)?;
+                    let client_addr = Self::read_address(stream)?;
+                    Some(Self::MasterServerRelayRequestToRelay {
+                        relay_id,
+                        server_addr,
+                        client_addr,
+                    })
+                }
+            },
+            PacketTypes::MasterServerRelayResponse => match source {
+                PacketSource::GameToGame => None,
+                PacketSource::GameToMaster => {
+                    let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                    let is_host = stream.read_flag()?;
+                    let address = Self::read_address_and_port(stream)?;
+                    Some(Self::MasterServerRelayResponseFromMaster {
+                        flags,
+                        key,
+                        session,
+                        is_host,
+                        address,
+                    })
+                }
+                PacketSource::MasterToRelay => {
+                    let relay_id = stream.read_u32()?;
+                    let relay_port = stream.read_u16()?;
+                    Some(Self::MasterServerRelayResponseFromRelay {
+                        relay_id,
+                        relay_port,
+                    })
+                }
+            },
+            PacketTypes::MasterServerRelayDelete => Some(Self::MasterServerRelayDelete {}),
+            PacketTypes::MasterServerRelayReady => {
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+
+                Some(Self::MasterServerRelayReady {
                     flags,
                     key,
                     session,
                 })
             }
-            PacketTypes::MasterServerRelayRequest => {
-                let address = Ipv4Addr::new(
-                    stream.read_u8(),
-                    stream.read_u8(),
-                    stream.read_u8(),
-                    stream.read_u8(),
-                );
-                let port = stream.read_u16();
-                Some(Self::MasterServerRelayRequest {
-                    address: (address, port),
-                })
-            }
-            PacketTypes::MasterServerRelayResponse => {
-                let is_host = stream.read_flag();
-                let address = (
-                    Ipv4Addr::new(
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                    ),
-                    stream.read_u16(),
-                );
-                Some(Self::MasterServerRelayResponse { is_host, address })
-            }
-            PacketTypes::MasterServerRelayReady => Some(Self::MasterServerRelayReady {}),
             PacketTypes::MasterServerJoinInvite => {
-                let invite_code = stream.read_cstring();
+                let invite_code = stream.read_cstring()?;
                 Some(Self::MasterServerJoinInvite { invite_code })
             }
             PacketTypes::MasterServerJoinInviteResponse => {
-                let flags = stream.read_u8();
-                let key_session = stream.read_u32();
-                let key = (key_session & 0xffff) as u16;
-                let session = (key_session >> 16) as u16;
-                let found = stream.read_u8();
-                let address = (
-                    Ipv4Addr::new(
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                        stream.read_u8(),
-                    ),
-                    stream.read_u16(),
-                );
+                let (flags, key, session) = Self::read_flags_key_session(stream)?;
+                let found = stream.read_u8()?;
+                let address = if found == 1 {
+                    Some(Self::read_address_and_port(stream)?)
+                } else {
+                    None
+                };
                 Some(Self::MasterServerJoinInviteResponse {
                     flags,
                     key,
                     session,
-                    found,
                     address,
                 })
             }
+            PacketTypes::MasterServerRelayHeartbeat => Some(Self::MasterServerRelayHeartbeat {}),
             _ => {
-                todo!("Unknown packet type: {} {:?}", packet_type, bytes)
+                todo!(
+                    "Unknown packet type: {} {:?}",
+                    packet_type,
+                    stream.as_bytes()
+                )
             }
-        }
+        })
     }
 
     pub fn into_bytes(self) -> Vec<u8> {
@@ -864,8 +895,7 @@ impl Packet {
                 session,
             } => {
                 out.write_u8(PacketTypes::MasterServerGameTypesRequest);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::MasterServerGameTypesResponse {
                 flags,
@@ -875,16 +905,15 @@ impl Packet {
                 mission_types,
             } => {
                 out.write_u8(PacketTypes::MasterServerGameTypesResponse);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
 
-                out.write_u32(game_types.len() as u32);
+                out.write_u8(game_types.len() as u8);
                 for game_type in game_types {
-                    out.write_cstring(game_type);
+                    out.write_cstring(&game_type);
                 }
-                out.write_u32(mission_types.len() as u32);
+                out.write_u8(mission_types.len() as u8);
                 for mission_type in mission_types {
-                    out.write_cstring(mission_type);
+                    out.write_cstring(&mission_type);
                 }
             }
             Packet::MasterServerListRequest {
@@ -904,11 +933,10 @@ impl Packet {
                 buddy_list,
             } => {
                 out.write_u8(PacketTypes::MasterServerListRequest);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
                 out.write_u8(packet_index);
-                out.write_cstring(game_type);
-                out.write_cstring(mission_type);
+                out.write_cstring(&game_type);
+                out.write_cstring(&mission_type);
                 out.write_u8(min_players);
                 out.write_u8(max_players);
                 out.write_u32(region_mask);
@@ -934,18 +962,13 @@ impl Packet {
                 servers,
             } => {
                 out.write_u8(PacketTypes::MasterServerListResponse);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
                 out.write_u8(packet_index);
                 out.write_u8(packet_total);
 
                 out.write_u16(servers.len() as u16);
                 for server in servers {
-                    out.write_u8(server.0.octets()[0]);
-                    out.write_u8(server.0.octets()[1]);
-                    out.write_u8(server.0.octets()[2]);
-                    out.write_u8(server.0.octets()[3]);
-                    out.write_u16(server.1);
+                    Self::write_address_and_port(&mut out, server);
                 }
             }
             Packet::GameMasterInfoRequest {
@@ -954,8 +977,7 @@ impl Packet {
                 session,
             } => {
                 out.write_u8(PacketTypes::GameMasterInfoRequest);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::GameMasterInfoResponse {
                 flags,
@@ -973,10 +995,9 @@ impl Packet {
                 guid_list,
             } => {
                 out.write_u8(PacketTypes::GameMasterInfoResponse);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
-                out.write_cstring(game_type);
-                out.write_cstring(mission_type);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+                out.write_cstring(&game_type);
+                out.write_cstring(&mission_type);
                 out.write_u8(max_players);
                 out.write_u32(region_mask);
                 out.write_u32(version);
@@ -998,8 +1019,7 @@ impl Packet {
                 session,
             } => {
                 out.write_u8(PacketTypes::GamePingRequest);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::GamePingResponse {
                 flags,
@@ -1012,13 +1032,12 @@ impl Packet {
                 name,
             } => {
                 out.write_u8(PacketTypes::GamePingResponse);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
-                Self::write_maybe_compressed_string(&mut out, flags, version_string);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+                Self::write_maybe_compressed_string(&mut out, flags, &version_string);
                 out.write_u32(current_protocol_version);
                 out.write_u32(min_required_protocol_version);
                 out.write_u32(version);
-                Self::write_maybe_compressed_string(&mut out, flags, name);
+                Self::write_maybe_compressed_string(&mut out, flags, &name);
             }
             Packet::GameInfoRequest {
                 flags,
@@ -1026,8 +1045,7 @@ impl Packet {
                 session,
             } => {
                 out.write_u8(PacketTypes::GameInfoRequest);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::GameInfoResponse {
                 flags,
@@ -1045,18 +1063,17 @@ impl Packet {
                 server_info_query,
             } => {
                 out.write_u8(PacketTypes::GameInfoResponse);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
-                Self::write_maybe_compressed_string(&mut out, flags, game_type);
-                Self::write_maybe_compressed_string(&mut out, flags, mission_type);
-                Self::write_maybe_compressed_string(&mut out, flags, mission_name);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+                Self::write_maybe_compressed_string(&mut out, flags, &game_type);
+                Self::write_maybe_compressed_string(&mut out, flags, &mission_type);
+                Self::write_maybe_compressed_string(&mut out, flags, &mission_name);
                 out.write_u8(filter_flag);
                 out.write_u8(player_count);
                 out.write_u8(max_players);
                 out.write_u8(bot_count);
                 out.write_u16(cpu_speed);
-                Self::write_maybe_compressed_string(&mut out, flags, server_info);
-                out.write_long_cstring(server_info_query);
+                Self::write_maybe_compressed_string(&mut out, flags, &server_info);
+                out.write_long_cstring(&server_info_query);
             }
             Packet::GameHeartbeat {
                 flags,
@@ -1064,8 +1081,7 @@ impl Packet {
                 session,
             } => {
                 out.write_u8(PacketTypes::GameHeartbeat);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::GGCPacket {} => {
                 out.write_u8(PacketTypes::GGCPacket);
@@ -1078,7 +1094,7 @@ impl Packet {
             Packet::ConnectChallengeReject { sequence, reason } => {
                 out.write_u8(PacketTypes::ConnectChallengeReject);
                 out.write_u32(sequence);
-                out.write_string(reason);
+                out.write_string(&reason);
             }
             Packet::ConnectChallengeResponse {
                 sequence,
@@ -1109,27 +1125,27 @@ impl Packet {
                 out.write_u32(address_digest[1]);
                 out.write_u32(address_digest[2]);
                 out.write_u32(address_digest[3]);
-                out.write_string(class_name);
+                out.write_string(&class_name);
 
                 // NetConnection::writeConnectRequest
                 out.write_u32(net_class_group);
                 out.write_u32(class_crc);
 
                 // GameConnection::writeConnectRequest
-                out.write_string(game_string);
+                out.write_string(&game_string);
                 out.write_u32(current_protocol_version);
                 out.write_u32(min_required_protocol_version);
-                out.write_string(join_password);
-                out.write_u32(connect_argv.len() as u32);
+                out.write_string(&join_password);
 
+                out.write_u32(connect_argv.len() as u32);
                 for arg in connect_argv {
-                    out.write_string(arg);
+                    out.write_string(&arg);
                 }
             }
             Packet::ConnectReject { sequence, reason } => {
                 out.write_u8(PacketTypes::ConnectReject);
                 out.write_u32(sequence);
-                out.write_string(reason);
+                out.write_string(&reason);
             }
             Packet::ConnectAccept {
                 sequence,
@@ -1145,7 +1161,7 @@ impl Packet {
             Packet::Disconnect { sequence, reason } => {
                 out.write_u8(PacketTypes::Disconnect);
                 out.write_u32(sequence);
-                out.write_string(reason);
+                out.write_string(&reason);
             }
             Packet::Punch {} => {
                 out.write_u8(PacketTypes::Punch);
@@ -1158,163 +1174,176 @@ impl Packet {
                 out.write_u32(sequence);
                 out.write_flag(debug_object_sizes);
             }
-            Packet::MasterServerRequestArrangedConnection {
-                address: (address, port),
-            } => {
+            Packet::MasterServerRequestArrangedConnection { address } => {
                 out.write_u8(PacketTypes::MasterServerRequestArrangedConnection);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
+                Self::write_address_and_port(&mut out, address);
             }
             Packet::MasterServerClientRequestedArrangedConnection {
+                flags,
+                key,
+                session,
                 client_id,
                 possible_addresses,
             } => {
                 out.write_u8(PacketTypes::MasterServerClientRequestedArrangedConnection);
+                Self::write_flags_key_session(&mut out, flags, key, session);
                 out.write_u16(client_id);
+
                 out.write_u8(possible_addresses.len() as u8);
-                for (address, port) in possible_addresses {
-                    out.write_u8(address.octets()[0]);
-                    out.write_u8(address.octets()[1]);
-                    out.write_u8(address.octets()[2]);
-                    out.write_u8(address.octets()[3]);
-                    out.write_u16(port);
+                for address in possible_addresses {
+                    Self::write_address_and_port(&mut out, address);
                 }
             }
             Packet::MasterServerAcceptArrangedConnection { client_id } => {
                 out.write_u8(PacketTypes::MasterServerAcceptArrangedConnection);
                 out.write_u16(client_id);
             }
-            Packet::MasterServerArrangedConnectionAccepted { possible_addresses } => {
+            Packet::MasterServerArrangedConnectionAccepted {
+                flags,
+                key,
+                session,
+                possible_addresses,
+            } => {
                 out.write_u8(PacketTypes::MasterServerArrangedConnectionAccepted);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+
                 out.write_u8(possible_addresses.len() as u8);
-                for (address, port) in possible_addresses {
-                    out.write_u8(address.octets()[0]);
-                    out.write_u8(address.octets()[1]);
-                    out.write_u8(address.octets()[2]);
-                    out.write_u8(address.octets()[3]);
-                    out.write_u16(port);
+                for address in possible_addresses {
+                    Self::write_address_and_port(&mut out, address);
                 }
             }
-            Packet::MasterServerRejectArrangedConnection { reason } => {
+            Packet::MasterServerRejectArrangedConnection { client_id } => {
                 out.write_u8(PacketTypes::MasterServerRejectArrangedConnection);
-                out.write_u8(reason);
+                out.write_u16(client_id);
             }
-            Packet::MasterServerArrangedConnectionRejected { reason } => {
+            Packet::MasterServerArrangedConnectionRejected {
+                flags,
+                key,
+                session,
+                reason,
+            } => {
                 out.write_u8(PacketTypes::MasterServerArrangedConnectionRejected);
+                Self::write_flags_key_session(&mut out, flags, key, session);
                 out.write_u8(reason);
             }
             Packet::MasterServerGamePingRequest {
-                address: (address, port),
+                address,
                 flags,
                 key,
                 session,
             } => {
                 out.write_u8(PacketTypes::MasterServerGamePingRequest);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
-                out.write_u8(flags);
-                out.write_u32(((session as u32) << 16) | ((key as u32) & 0xffff));
+                // Backwards because fuck me that's why
+                Self::write_address_and_port(&mut out, address);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::MasterServerGamePingResponse {
-                address: (address, port),
-                cmd,
                 flags,
                 key,
                 session,
+                address,
+                buffer,
             } => {
                 out.write_u8(PacketTypes::MasterServerGamePingResponse);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
-                out.write_u8(cmd);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+                Self::write_address_and_port(&mut out, address);
+                for b in buffer {
+                    out.write_u8(b);
+                }
             }
             Packet::MasterServerGameInfoRequest {
-                address: (address, port),
+                address,
                 flags,
                 key,
                 session,
             } => {
                 out.write_u8(PacketTypes::MasterServerGameInfoRequest);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
-                out.write_u8(flags);
-                out.write_u32(((session as u32) << 16) | ((key as u32) & 0xffff));
+                Self::write_address_and_port(&mut out, address);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::MasterServerGameInfoResponse {
-                address: (address, port),
-                cmd,
+                flags,
+                key,
+                session,
+                address,
+                buffer,
+            } => {
+                out.write_u8(PacketTypes::MasterServerGameInfoResponse);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+                Self::write_address_and_port(&mut out, address);
+                for b in buffer {
+                    out.write_u8(b);
+                }
+            }
+            Packet::MasterServerRelayRequestToMaster { address } => {
+                out.write_u8(PacketTypes::MasterServerRelayRequest);
+                Self::write_address_and_port(&mut out, address);
+            }
+            Packet::MasterServerRelayRequestToRelay {
+                relay_id,
+                server_addr,
+                client_addr,
+            } => {
+                out.write_u8(PacketTypes::MasterServerRelayRequest);
+                out.write_u32(relay_id);
+                Self::write_address_and_port(&mut out, server_addr);
+                Self::write_address(&mut out, client_addr);
+            }
+            Packet::MasterServerRelayResponseFromMaster {
+                flags,
+                key,
+                session,
+                is_host,
+                address,
+            } => {
+                out.write_u8(PacketTypes::MasterServerRelayResponse);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+                out.write_flag(is_host);
+                Self::write_address_and_port(&mut out, address);
+            }
+            Packet::MasterServerRelayResponseFromRelay {
+                relay_id,
+                relay_port,
+            } => {
+                out.write_u8(PacketTypes::MasterServerRelayResponse);
+                out.write_u32(relay_id);
+                out.write_u16(relay_port);
+            }
+            Packet::MasterServerRelayDelete {} => {
+                out.write_u8(PacketTypes::MasterServerRelayDelete);
+            }
+            Packet::MasterServerRelayReady {
                 flags,
                 key,
                 session,
             } => {
-                out.write_u8(PacketTypes::MasterServerGameInfoResponse);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
-                out.write_u8(cmd);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
-            }
-            Packet::MasterServerRelayRequest {
-                address: (address, port),
-            } => {
-                out.write_u8(PacketTypes::MasterServerRelayRequest);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
-            }
-            Packet::MasterServerRelayResponse {
-                is_host,
-                address: (address, port),
-            } => {
-                out.write_u8(PacketTypes::MasterServerRelayResponse);
-                out.write_flag(is_host);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
-            }
-            Packet::MasterServerRelayReady {} => {
                 out.write_u8(PacketTypes::MasterServerRelayReady);
+                Self::write_flags_key_session(&mut out, flags, key, session);
             }
             Packet::MasterServerJoinInvite { invite_code } => {
                 out.write_u8(PacketTypes::MasterServerJoinInvite);
-                out.write_cstring(invite_code);
+                out.write_cstring(&invite_code);
             }
             Packet::MasterServerJoinInviteResponse {
                 flags,
                 key,
                 session,
-                found,
-                address: (address, port),
+                address,
             } => {
                 out.write_u8(PacketTypes::MasterServerJoinInviteResponse);
-                out.write_u8(flags);
-                out.write_u32((session as u32) << 16 | key as u32);
-                out.write_u8(found);
-                out.write_u8(address.octets()[0]);
-                out.write_u8(address.octets()[1]);
-                out.write_u8(address.octets()[2]);
-                out.write_u8(address.octets()[3]);
-                out.write_u16(port);
+                Self::write_flags_key_session(&mut out, flags, key, session);
+                match address {
+                    Some(address) => {
+                        out.write_u8(1);
+                        Self::write_address_and_port(&mut out, address);
+                    }
+                    None => {
+                        out.write_u8(0);
+                    }
+                }
+            }
+            Packet::MasterServerRelayHeartbeat {} => {
+                out.write_u8(PacketTypes::MasterServerRelayHeartbeat);
             }
         }
 

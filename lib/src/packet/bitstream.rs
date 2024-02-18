@@ -1,4 +1,5 @@
 use super::huffman::HuffmanProcessor;
+use anyhow::{anyhow, Result};
 use std::f32::consts::{FRAC_1_SQRT_2, PI, SQRT_2};
 
 const POINT_EPSILON: f32 = 0.0001f32;
@@ -56,10 +57,14 @@ impl BitStream {
         self.shift = pos % 8;
     }
 
-    fn read_bits(&mut self, bits: usize) -> u8 {
+    fn read_bits(&mut self, bits: usize) -> Result<u8> {
         assert!(bits <= 8);
+
+        if self.position >= self.len() {
+            return Err(anyhow!("End of stream"));
+        }
         if bits == 0 {
-            return 0;
+            return Ok(0);
         }
 
         let mut result;
@@ -83,6 +88,10 @@ impl BitStream {
             //If we hit 32 exactly then this will just be extra wasted time. Optimize
             // it out unless we need it.
             if extra != 0 {
+                if self.position >= self.len() {
+                    return Err(anyhow!("End of stream"));
+                }
+
                 //Get the second, upper, part of the number from the new top and
                 // shift it over so it lines up
                 let second = (self.data[self.position] & (0xFF >> (8 - extra))) << remain;
@@ -99,7 +108,7 @@ impl BitStream {
             //Just add to the shift
             self.shift += bits;
         }
-        return result;
+        return Ok(result);
     }
 
     fn write_bits(&mut self, mut value: u8, bits: usize) -> u8 {
@@ -164,18 +173,18 @@ impl BitStream {
         return value;
     }
 
-    pub fn read_int(&mut self, mut bits: usize) -> u32 {
+    pub fn read_int(&mut self, mut bits: usize) -> Result<u32> {
         let mut value = 0;
         let mut shift = 0;
         loop {
-            value |= (self.read_bits(bits.min(8)) as u32) << shift;
+            value |= (self.read_bits(bits.min(8))? as u32) << shift;
             shift += 8;
             if bits <= 8 {
                 break;
             }
             bits -= 8;
         }
-        return value;
+        return Ok(value);
     }
 
     pub fn write_int(&mut self, mut value: u32, mut bits: usize) -> u32 {
@@ -191,81 +200,81 @@ impl BitStream {
         return original;
     }
 
-    pub fn read_flag(&mut self) -> bool {
-        return self.read_int(1) == 1;
+    pub fn read_flag(&mut self) -> Result<bool> {
+        return Ok(self.read_int(1)? == 1);
     }
 
-    pub fn read_u8(&mut self) -> u8 {
-        return self.read_int(8) as u8;
+    pub fn read_u8(&mut self) -> Result<u8> {
+        return Ok(self.read_int(8)? as u8);
     }
 
-    pub fn read_u16(&mut self) -> u16 {
-        return self.read_int(16) as u16;
+    pub fn read_u16(&mut self) -> Result<u16> {
+        return Ok(self.read_int(16)? as u16);
     }
 
-    pub fn read_u32(&mut self) -> u32 {
-        return self.read_int(32) as u32;
+    pub fn read_u32(&mut self) -> Result<u32> {
+        return Ok(self.read_int(32)? as u32);
     }
 
-    pub fn read_string(&mut self) -> String {
+    pub fn read_string(&mut self) -> Result<String> {
         HuffmanProcessor::read_string(self)
     }
 
-    pub fn read_cstring(&mut self) -> String {
-        let len = self.read_u8();
+    pub fn read_cstring(&mut self) -> Result<String> {
+        let len = self.read_u8()?;
         let mut chars = vec![];
         for _ in 0..len {
-            chars.push(self.read_u8());
+            chars.push(self.read_u8()?);
         }
-        return chars.into_iter().map(|c| c as char).collect();
+        return Ok(chars.into_iter().map(|c| c as char).collect());
     }
 
-    pub fn read_long_cstring(&mut self) -> String {
-        let len = self.read_u16();
+    pub fn read_long_cstring(&mut self) -> Result<String> {
+        let len = self.read_u16()?;
         let mut chars = vec![];
         for _ in 0..len {
-            chars.push(self.read_u8());
+            chars.push(self.read_u8()?);
         }
-        return chars.into_iter().map(|c| c as char).collect();
+        return Ok(chars.into_iter().map(|c| c as char).collect());
     }
 
-    pub fn read_float_zero_to_one(&mut self, bit_count: usize) -> f32 {
+    pub fn read_float_zero_to_one(&mut self, bit_count: usize) -> Result<f32> {
         let max_int = (1u32 << bit_count) - 1;
-        let i = self.read_int(bit_count);
+        let i = self.read_int(bit_count)?;
         if i == 0 {
-            return 0f32;
+            return Ok(0f32);
         }
         if i == (max_int / 2) + 1 {
-            return 0.5f32;
+            return Ok(0.5f32);
         }
         if i == max_int {
-            return 1.0f32;
+            return Ok(1.0f32);
         }
-        return (i as f32) / (max_int as f32);
+        return Ok((i as f32) / (max_int as f32));
     }
 
-    pub fn read_signed_float_neg_one_to_one(&mut self, bit_count: usize) -> f32 {
-        return self.read_float_zero_to_one(bit_count) * 2f32 - 1f32;
+    pub fn read_signed_float_neg_one_to_one(&mut self, bit_count: usize) -> Result<f32> {
+        return Ok(self.read_float_zero_to_one(bit_count)? * 2f32 - 1f32);
     }
 
-    pub fn read_signed_int(&mut self, bit_count: usize) -> i32 {
+    pub fn read_signed_int(&mut self, bit_count: usize) -> Result<i32> {
         // 1s complement because torque is torque
-        if self.read_flag() {
-            return -(self.read_int(bit_count - 1) as i32);
+        if self.read_flag()? {
+            return Ok(-(self.read_int(bit_count - 1)? as i32));
         } else {
-            return self.read_int(bit_count - 1) as i32;
+            return Ok(self.read_int(bit_count - 1)? as i32);
         }
     }
 
-    pub fn read_normal_vector(&mut self, bit_count: usize) -> (f32, f32, f32) {
-        let phi = self.read_signed_float_neg_one_to_one(bit_count + 1) * PI;
-        let theta = self.read_signed_float_neg_one_to_one(bit_count) * (PI / 2.0);
+    pub fn read_normal_vector(&mut self, bit_count: usize) -> Result<(f32, f32, f32)> {
+        let phi = self.read_signed_float_neg_one_to_one(bit_count + 1)? * PI;
+        let theta = self.read_signed_float_neg_one_to_one(bit_count)? * (PI / 2.0);
 
-        (
+        Ok((
             phi.sin() * theta.cos(),
             phi.cos() * theta.cos(),
             theta.sin(),
-        )
+        ))
     }
 
     pub fn read_vector(
@@ -273,32 +282,32 @@ impl BitStream {
         max_magnitude: f32,
         magnitude_bits: usize,
         normal_bits: usize,
-    ) -> (f32, f32, f32) {
-        if !self.read_flag() {
-            return (0.0, 0.0, 0.0);
+    ) -> Result<(f32, f32, f32)> {
+        if !self.read_flag()? {
+            return Ok((0.0, 0.0, 0.0));
         }
 
         let mag;
-        if self.read_flag() {
-            mag = self.read_float_zero_to_one(magnitude_bits) * max_magnitude;
+        if self.read_flag()? {
+            mag = self.read_float_zero_to_one(magnitude_bits)? * max_magnitude;
         } else {
-            mag = f32::from_bits(self.read_int(32));
+            mag = f32::from_bits(self.read_int(32)?);
         }
 
-        let normal = self.read_normal_vector(normal_bits);
-        (normal.0 * mag, normal.1 * mag, normal.2 * mag)
+        let normal = self.read_normal_vector(normal_bits)?;
+        Ok((normal.0 * mag, normal.1 * mag, normal.2 * mag))
     }
 
-    pub fn read_quat(&mut self, bit_count: usize) -> (f32, f32, f32, f32) {
+    pub fn read_quat(&mut self, bit_count: usize) -> Result<(f32, f32, f32, f32)> {
         let mut vals = [0f32; 4];
         let mut sum = 0f32;
 
-        let idx_max = self.read_int(2) as usize;
+        let idx_max = self.read_int(2)? as usize;
         for i in 0..4 {
             if i == idx_max {
                 continue;
             }
-            vals[i] = self.read_signed_float_neg_one_to_one(bit_count) * FRAC_1_SQRT_2;
+            vals[i] = self.read_signed_float_neg_one_to_one(bit_count)? * FRAC_1_SQRT_2;
             sum += vals[i] * vals[i];
         }
 
@@ -308,30 +317,30 @@ impl BitStream {
             vals[idx_max] = (1.0 - sum).sqrt();
         }
 
-        return (vals[0], vals[1], vals[2], vals[3]);
+        return Ok((vals[0], vals[1], vals[2], vals[3]));
     }
 
-    pub fn read_ranged_u32(&mut self, range_start: u32, range_end: u32) -> u32 {
+    pub fn read_ranged_u32(&mut self, range_start: u32, range_end: u32) -> Result<u32> {
         let range_size = range_end - range_start + 1;
         let range_bits = range_size.next_power_of_two().trailing_zeros();
 
-        let val = self.read_int(range_bits as usize);
-        return val + range_start;
+        let val = self.read_int(range_bits as usize)?;
+        return Ok(val + range_start);
     }
 
-    pub fn read_cussed_u32(&mut self) -> u32 {
-        if self.read_flag() {
-            return 0;
-        } else if self.read_flag() {
-            return self.read_ranged_u32(0, 0xF);
-        } else if self.read_flag() {
-            return self.read_ranged_u32(0, 0xFF);
-        } else if self.read_flag() {
-            return self.read_ranged_u32(0, 0xFFFF);
-        } else if self.read_flag() {
-            return self.read_ranged_u32(0, 0xFFFFFF);
+    pub fn read_cussed_u32(&mut self) -> Result<u32> {
+        if self.read_flag()? {
+            return Ok(0);
+        } else if self.read_flag()? {
+            return Ok(self.read_ranged_u32(0, 0xF)?);
+        } else if self.read_flag()? {
+            return Ok(self.read_ranged_u32(0, 0xFF)?);
+        } else if self.read_flag()? {
+            return Ok(self.read_ranged_u32(0, 0xFFFF)?);
+        } else if self.read_flag()? {
+            return Ok(self.read_ranged_u32(0, 0xFFFFFF)?);
         } else {
-            return self.read_ranged_u32(0, 0xFFFFFFFF);
+            return Ok(self.read_ranged_u32(0, 0xFFFFFFFF)?);
         }
     }
 
@@ -355,27 +364,27 @@ impl BitStream {
         return value;
     }
 
-    pub fn write_string(&mut self, value: String) -> String {
-        HuffmanProcessor::write_string(self, &value);
-        return value;
+    pub fn write_string(&mut self, value: &String) -> String {
+        HuffmanProcessor::write_string(self, value);
+        return value.clone();
     }
 
-    pub fn write_cstring(&mut self, value: String) -> String {
+    pub fn write_cstring(&mut self, value: &String) -> String {
         assert!(value.len() < 256);
         self.write_u8(value.len() as u8);
         for ch in value.chars() {
             self.write_u8(ch as u8);
         }
-        return value;
+        return value.clone();
     }
 
-    pub fn write_long_cstring(&mut self, value: String) -> String {
+    pub fn write_long_cstring(&mut self, value: &String) -> String {
         assert!(value.len() < 65536);
         self.write_u16(value.len() as u16);
         for ch in value.chars() {
             self.write_u8(ch as u8);
         }
-        return value;
+        return value.clone();
     }
 
     pub fn write_float_zero_to_one(&mut self, mut value: f32, bit_count: usize) -> f32 {

@@ -1,5 +1,6 @@
 use crate::packet::Packet;
 use crate::BitStream;
+use crate::PacketSource::GameToMaster;
 use anyhow::{anyhow, Error, Result};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -23,7 +24,6 @@ impl MasterServer {
     pub async fn connect<B: ToSocketAddrs, C: ToSocketAddrs>(
         bind_address: B,
         connect_address: C,
-        connect_sequence: u32,
     ) -> Result<Self> {
         let socket = UdpSocket::bind(bind_address).await?;
         let std_socket = socket.into_std()?;
@@ -61,7 +61,7 @@ impl MasterServer {
                 let mut buf: [u8; 1400] = [0; 1400];
                 let len = rx_socket.recv(&mut buf).await?;
                 println!("<<< {:?}", &buf[0..len]);
-                if let Some(packet) = Packet::try_from_bytes(&buf[0..len]) {
+                if let Some(packet) = Packet::try_from_bytes(&buf[0..len], GameToMaster) {
                     println!("<<< {:#?}", &packet);
                     rx_tx.send(packet)?;
                 }

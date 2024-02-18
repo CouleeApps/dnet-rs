@@ -3,6 +3,7 @@
 #![allow(non_camel_case_types)]
 
 use super::bitstream::BitStream;
+use anyhow::Result;
 use std::ptr::null_mut;
 
 // DANGER: Chock full of danger
@@ -200,7 +201,9 @@ impl HuffmanProcessor {
         if index < 0 {
             stream.set_bit_pos(0);
             // Real torque doesn't limit `code` to `numBits` but this is fine for us
-            self.m_huffLeaves[-(index + 1) as usize].code = stream.read_int(depth as usize);
+            self.m_huffLeaves[-(index + 1) as usize].code = stream
+                .read_int(depth as usize)
+                .expect("probably enough bytes in here");
             self.m_huffLeaves[-(index + 1) as usize].numBits = depth as u8;
         } else {
             let index0 = self.m_huffNodes[index as usize].index0;
@@ -219,13 +222,13 @@ impl HuffmanProcessor {
         }
     }
 
-    fn readHuffBuffer(&mut self, stream: &mut BitStream, buffer: &mut [u8]) -> u32 {
+    fn readHuffBuffer(&mut self, stream: &mut BitStream, buffer: &mut [u8]) -> Result<u32> {
         if !self.m_tablesBuilt {
             self.buildTables();
         }
 
-        if stream.read_flag() {
-            let mut len = stream.read_int(8);
+        if stream.read_flag()? {
+            let mut len = stream.read_int(8)?;
             if len >= buffer.len() as u32 {
                 len = buffer.len() as u32;
             }
@@ -235,7 +238,7 @@ impl HuffmanProcessor {
                 // TERMINATION: Lol maybe
                 loop {
                     if index >= 0 {
-                        if stream.read_flag() {
+                        if stream.read_flag()? {
                             index = self.m_huffNodes[index as usize].index1;
                         } else {
                             index = self.m_huffNodes[index as usize].index0;
@@ -246,17 +249,17 @@ impl HuffmanProcessor {
                     }
                 }
             }
-            return len;
+            return Ok(len);
         } else {
-            let mut len = stream.read_int(8);
+            let mut len = stream.read_int(8)?;
             if len >= buffer.len() as u32 {
                 len = buffer.len() as u32;
             }
 
             for i in 0..len {
-                buffer[i as usize] = stream.read_u8();
+                buffer[i as usize] = stream.read_u8()?;
             }
-            return len;
+            return Ok(len);
         }
     }
 
@@ -312,9 +315,9 @@ impl HuffmanProcessor {
 
     // Functions provided to nicely hide all the danger from you
 
-    pub fn read_buffer(stream: &mut BitStream, buffer: &mut [u8]) -> usize {
+    pub fn read_buffer(stream: &mut BitStream, buffer: &mut [u8]) -> Result<usize> {
         // SAFETY: Dangerous
-        return unsafe { g_huffProcessor.readHuffBuffer(stream, buffer) as usize };
+        return Ok(unsafe { g_huffProcessor.readHuffBuffer(stream, buffer)? as usize });
     }
 
     pub fn write_buffer(stream: &mut BitStream, buffer: Option<&[u8]>, maxLen: usize) -> usize {
@@ -322,11 +325,11 @@ impl HuffmanProcessor {
         return unsafe { g_huffProcessor.writeHuffBuffer(stream, buffer, maxLen as u32) as usize };
     }
 
-    pub fn read_string(stream: &mut BitStream) -> String {
+    pub fn read_string(stream: &mut BitStream) -> Result<String> {
         let mut buffer = [0u8; 256];
-        let length = Self::read_buffer(stream, &mut buffer);
+        let length = Self::read_buffer(stream, &mut buffer)?;
 
-        return buffer[0..length].iter().map(|&c| c as char).collect();
+        return Ok(buffer[0..length].iter().map(|&c| c as char).collect());
     }
 
     pub fn write_string(stream: &mut BitStream, value: &String) -> usize {

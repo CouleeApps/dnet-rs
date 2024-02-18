@@ -6,4 +6,5 @@ pub use bitstream::BitStream;
 pub use packet::FilterFlags;
 pub use packet::NetClassGroups;
 pub use packet::Packet;
+pub use packet::PacketSource;
 pub use packet::QueryFlags;

@@ -49,12 +49,12 @@ impl DNet {
     pub fn process_raw_packet(&mut self, mut stream: BitStream) -> Result<Vec<DNetResult>> {
         let mut results = vec![];
 
-        stream.read_flag();
-        let connect_seq_bit = stream.read_int(1);
-        let mut seq_num = stream.read_int(9);
-        let mut highest_ack = stream.read_int(9);
-        let packet_type = stream.read_int(2);
-        let ack_byte_count = stream.read_int(3);
+        stream.read_flag()?;
+        let connect_seq_bit = stream.read_int(1)?;
+        let mut seq_num = stream.read_int(9)?;
+        let mut highest_ack = stream.read_int(9)?;
+        let packet_type = stream.read_int(2)?;
+        let ack_byte_count = stream.read_int(3)?;
 
         if connect_seq_bit != (self.connect_sequence & 1) {
             return Err(Error::msg("Bad seq bit"));
@@ -66,7 +66,7 @@ impl DNet {
             return Err(Error::msg("Invalid packet type"));
         }
 
-        let ack_mask = stream.read_int((8 * ack_byte_count) as usize);
+        let ack_mask = stream.read_int((8 * ack_byte_count) as usize)?;
 
         // Check if packet number is within sequence window
         seq_num |= self.last_seq_received & 0xFFFFFE00;

@@ -2,7 +2,8 @@
 
 use super::dnet::{DNet, DNetResult, NetPacketType};
 use crate::packet::Packet;
-use crate::BitStream;
+use crate::PacketSource::GameToGame;
+use crate::{BitStream, PacketSource};
 use anyhow::{Error, Result};
 use rand::Rng;
 use std::time::Duration;
@@ -57,7 +58,7 @@ impl GameConnection {
         let len = self.socket.recv(bytes.as_mut_slice()).await?;
 
         println!("<<< {:?}", &bytes[0..len]);
-        let packet = Packet::try_from_bytes(&bytes[0..len]);
+        let packet = Packet::try_from_bytes(&bytes[0..len], GameToGame);
 
         Ok(packet)
     }

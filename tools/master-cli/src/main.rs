@@ -20,7 +20,7 @@ async fn run_with_timeout<T>(timeout: Duration, f: impl Future<Output = Result<T
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let mut master = MasterServer::connect("0.0.0.0:29000", "127.0.0.1:28002", 1).await?;
+    let mut master = MasterServer::connect("0.0.0.0:29000", "127.0.0.1:28002").await?;
     let found_servers = master
         .query_servers(
             0,
