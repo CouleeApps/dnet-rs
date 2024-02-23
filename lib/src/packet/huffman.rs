@@ -4,10 +4,12 @@
 
 use super::bitstream::BitStream;
 use anyhow::Result;
+use lazy_static::lazy_static;
 use std::ptr::null_mut;
 
-// DANGER: Chock full of danger
-static mut g_huffProcessor: HuffmanProcessor = HuffmanProcessor::new();
+lazy_static! {
+    static ref g_huffProcessor: HuffmanProcessor = HuffmanProcessor::new();
+}
 
 // This giant array of u32s is your last chance to not see the danger
 const csm_charFreqs: [u32; 256] = [
@@ -88,12 +90,14 @@ impl HuffWrap {
 
 // XXX: Cursed. It's all cursed. Oh God
 impl HuffmanProcessor {
-    const fn new() -> Self {
-        HuffmanProcessor {
+    fn new() -> Self {
+        let mut processor = HuffmanProcessor {
             m_tablesBuilt: false,
             m_huffNodes: vec![],
             m_huffLeaves: vec![],
-        }
+        };
+        processor.buildTables();
+        processor
     }
 
     fn buildTables(&mut self) {
@@ -222,10 +226,8 @@ impl HuffmanProcessor {
         }
     }
 
-    fn readHuffBuffer(&mut self, stream: &mut BitStream, buffer: &mut [u8]) -> Result<u32> {
-        if !self.m_tablesBuilt {
-            self.buildTables();
-        }
+    fn readHuffBuffer(&self, stream: &mut BitStream, buffer: &mut [u8]) -> Result<u32> {
+        assert!(self.m_tablesBuilt);
 
         if stream.read_flag()? {
             let mut len = stream.read_int(8)?;
@@ -263,21 +265,14 @@ impl HuffmanProcessor {
         }
     }
 
-    fn writeHuffBuffer(
-        &mut self,
-        stream: &mut BitStream,
-        buffer: Option<&[u8]>,
-        maxLen: u32,
-    ) -> u32 {
+    fn writeHuffBuffer(&self, stream: &mut BitStream, buffer: Option<&[u8]>, maxLen: u32) -> u32 {
         if buffer.is_none() {
             stream.write_flag(false);
             stream.write_int(0, 8);
             return 0;
         }
 
-        if !self.m_tablesBuilt {
-            self.buildTables();
-        }
+        assert!(self.m_tablesBuilt);
 
         let buffer = buffer.unwrap();
         let mut len = buffer.len() as u32;
@@ -317,12 +312,12 @@ impl HuffmanProcessor {
 
     pub fn read_buffer(stream: &mut BitStream, buffer: &mut [u8]) -> Result<usize> {
         // SAFETY: Dangerous
-        return Ok(unsafe { g_huffProcessor.readHuffBuffer(stream, buffer)? as usize });
+        return Ok(g_huffProcessor.readHuffBuffer(stream, buffer)? as usize);
     }
 
     pub fn write_buffer(stream: &mut BitStream, buffer: Option<&[u8]>, maxLen: usize) -> usize {
         // SAFETY: Dangerous
-        return unsafe { g_huffProcessor.writeHuffBuffer(stream, buffer, maxLen as u32) as usize };
+        return g_huffProcessor.writeHuffBuffer(stream, buffer, maxLen as u32) as usize;
     }
 
     pub fn read_string(stream: &mut BitStream) -> Result<String> {
