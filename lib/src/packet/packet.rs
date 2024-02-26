@@ -256,7 +256,7 @@ pub enum Packet {
         key: u16,
         session: u16,
         address: (Ipv4Addr, u16),
-        buffer: Vec<u8>,
+        packet: Box<Packet>,
     },
     MasterServerGameInfoRequest {
         address: (Ipv4Addr, u16),
@@ -269,7 +269,7 @@ pub enum Packet {
         key: u16,
         session: u16,
         address: (Ipv4Addr, u16),
-        buffer: Vec<u8>,
+        packet: Box<Packet>,
     },
     MasterServerRelayRequestToMaster {
         address: (Ipv4Addr, u16),
@@ -773,12 +773,14 @@ impl Packet {
                 let (flags, key, session) = Self::read_flags_key_session(stream)?;
                 let address = Self::read_address_and_port(stream)?;
                 let buffer = Vec::from(&stream.as_bytes()[(stream.get_bit_pos() / 8)..]);
+                let packet = Packet::try_from_bytes(buffer.as_slice(), source)
+                    .unwrap_or_else(|| Self::Raw(buffer));
                 Some(Self::MasterServerGamePingResponse {
                     flags,
                     key,
                     session,
                     address,
-                    buffer,
+                    packet: Box::new(packet),
                 })
             }
             PacketTypes::MasterServerGameInfoRequest => {
@@ -795,12 +797,15 @@ impl Packet {
                 let (flags, key, session) = Self::read_flags_key_session(stream)?;
                 let address = Self::read_address_and_port(stream)?;
                 let buffer = Vec::from(&stream.as_bytes()[(stream.get_bit_pos() / 8)..]);
+                let packet = Packet::try_from_bytes(buffer.as_slice(), source)
+                    .unwrap_or_else(|| Self::Raw(buffer));
+
                 Some(Self::MasterServerGameInfoResponse {
                     flags,
                     key,
                     session,
                     address,
-                    buffer,
+                    packet: Box::new(packet),
                 })
             }
             PacketTypes::MasterServerRelayRequest => match source {
@@ -874,11 +879,12 @@ impl Packet {
             }
             PacketTypes::MasterServerRelayHeartbeat => Some(Self::MasterServerRelayHeartbeat {}),
             _ => {
-                todo!(
+                eprintln!(
                     "Unknown packet type: {} {:?}",
                     packet_type,
                     stream.as_bytes()
-                )
+                );
+                None
             }
         })
     }
@@ -1242,12 +1248,12 @@ impl Packet {
                 key,
                 session,
                 address,
-                buffer,
+                packet,
             } => {
                 out.write_u8(PacketTypes::MasterServerGamePingResponse);
                 Self::write_flags_key_session(&mut out, flags, key, session);
                 Self::write_address_and_port(&mut out, address);
-                for b in buffer {
+                for b in packet.into_bytes() {
                     out.write_u8(b);
                 }
             }
@@ -1266,12 +1272,12 @@ impl Packet {
                 key,
                 session,
                 address,
-                buffer,
+                packet,
             } => {
                 out.write_u8(PacketTypes::MasterServerGameInfoResponse);
                 Self::write_flags_key_session(&mut out, flags, key, session);
                 Self::write_address_and_port(&mut out, address);
-                for b in buffer {
+                for b in packet.into_bytes() {
                     out.write_u8(b);
                 }
             }

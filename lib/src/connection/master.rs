@@ -101,11 +101,11 @@ impl MasterServer {
         mission_type: String,
         min_players: u8,
         max_players: u8,
-        max_bots: u8,
         region_mask: u32,
         version: u32,
-        min_cpu: u16,
         filter_flag: u8,
+        max_bots: u8,
+        min_cpu: u16,
         buddy_list: Vec<u32>,
     ) -> Result<Vec<(Ipv4Addr, u16)>> {
         let mut rx = self.rx.resubscribe();
